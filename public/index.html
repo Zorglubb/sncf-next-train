@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Trains</title>
 
-  <!-- PWA & Métadonnées plein écran -->
-  <link rel="manifest" href="/manifest.json?v=4">
+  <!-- PWA & Métadonnées -->
+  <link rel="manifest" href="/manifest.json?v=5">
   <meta name="theme-color" content="#0f172a">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -145,13 +145,17 @@
     }
     .badge.on-time { background: rgba(74, 222, 128, 0.15); color: var(--success); }
     .badge.late { background: rgba(248, 113, 113, 0.15); color: var(--warning); }
+    
+    /* Badge de Voie / Quai mis en valeur */
     .badge-track {
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: #cbd5e1;
-      background: #1e293b;
-      padding: 2px 8px;
+      font-size: 0.78rem;
+      font-weight: 800;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      padding: 2px 7px;
       border-radius: 6px;
+      letter-spacing: 0.5px;
     }
     .btn-more {
       width: 100%;
@@ -196,7 +200,7 @@
     .btn-action:active {
       background: #64748b;
     }
-    /* Masqué par défaut */
+    /* Menu debug masqué */
     .perf-tracker {
       display: none;
       margin-top: 18px;
