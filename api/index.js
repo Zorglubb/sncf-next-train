@@ -13,39 +13,31 @@ export default async function handler(req) {
   // Gares SNCF
   const GARE_VIERZON = 'stop_area:SNCF:87576009';
   const GARE_BOURGES = 'stop_area:SNCF:87576207';
-  
-  // Codes pour l'API des panneaux d'affichage en gare
-  const UIC_VIERZON = '87576009';
-  const UIC_BOURGES = '87576207';
 
   // Bascule selon l'heure (Europe/Paris)
   const optionsDate = { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false };
   const currentHour = parseInt(new Intl.DateTimeFormat('fr-FR', optionsDate).format(new Date()), 10);
 
-  let depart, arrivee, destinationLabel, uicDepart;
+  let depart, arrivee, destinationLabel;
 
   if (currentHour >= 4 && currentHour < 13) {
     depart = GARE_VIERZON;
     arrivee = GARE_BOURGES;
     destinationLabel = 'Bourges';
-    uicDepart = UIC_VIERZON;
   } else {
     depart = GARE_BOURGES;
     arrivee = GARE_VIERZON;
     destinationLabel = 'Vierzon';
-    uicDepart = UIC_BOURGES;
   }
 
   if (dirParam === 'vierzon') {
     depart = GARE_BOURGES;
     arrivee = GARE_VIERZON;
     destinationLabel = 'Vierzon';
-    uicDepart = UIC_BOURGES;
   } else if (dirParam === 'bourges') {
     depart = GARE_VIERZON;
     arrivee = GARE_BOURGES;
     destinationLabel = 'Bourges';
-    uicDepart = UIC_VIERZON;
   }
 
   // Date / Heure
@@ -55,25 +47,25 @@ export default async function handler(req) {
     dateSNCF = now.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
   }
 
+  const authHeader = 'Basic ' + btoa(process.env.SNCF_API_KEY + ':');
+
+  // 1. Requête itinéraire (Navitia journeys)
   const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=10&max_nb_transfers=0&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
-  
-  // Requête vers le flux Infogare (panneaux des départs en direct de la gare d'origine)
-  const garesUrl = `https://data.sncf.com/api/explore/v2.1/catalog/datasets/table-affichage-gares-departs/records?where=search(codes_uic%2C%20%22${uicDepart}%22)&limit=30`;
+
+  // 2. Requête tableau des départs temps réel de la gare (contient les quais/voies)
+  const departuresUrl = `https://api.sncf.com/v1/coverage/sncf/stop_areas/${depart}/departures?datetime=${dateSNCF}&count=20`;
 
   try {
-    const [sncfRes, garesRes] = await Promise.all([
-      fetch(sncfUrl, {
-        headers: { Authorization: 'Basic ' + btoa(process.env.SNCF_API_KEY + ':') },
-      }),
-      fetch(garesUrl).catch(() => null)
+    const [sncfRes, depRes] = await Promise.all([
+      fetch(sncfUrl, { headers: { Authorization: authHeader } }),
+      fetch(departuresUrl, { headers: { Authorization: authHeader } }).catch(() => null)
     ]);
 
     const data = await sncfRes.json();
-    
-    let garesPanneaux = [];
-    if (garesRes && garesRes.ok) {
-      const garesData = await garesRes.json();
-      garesPanneaux = garesData.results || [];
+    let departuresList = [];
+    if (depRes && depRes.ok) {
+      const depData = await depRes.json();
+      departuresList = depData.departures || [];
     }
 
     if (!data.journeys || data.journeys.length === 0) {
@@ -82,7 +74,7 @@ export default async function handler(req) {
       });
     }
 
-    // Filtrer les TER (exclure Intercités et cars)
+    // Filtrage strict : TER uniquement
     const terOnlyTrains = data.journeys.filter((journey) => {
       const s = journey.sections?.find((sec) => sec.type === 'public_transport') || journey.sections?.[0];
       if (!s) return false;
@@ -112,7 +104,7 @@ export default async function handler(req) {
 
       const s = journey.sections?.find((sec) => sec.type === 'public_transport') || journey.sections?.[0];
 
-      // Retard
+      // Calcul retard
       const theorie = s?.base_departure_date_time;
       const reel = s?.departure_date_time;
       let retardMinutes = 0;
@@ -134,31 +126,38 @@ export default async function handler(req) {
                      s?.display_informations?.trip_short_name || 
                      s?.display_informations?.code || '';
 
-      // Recherche de la VOIE / QUAI
+      // Recherche de quai :
+      // 1. Directement dans l'objet section s'il existe
       let quai = s?.display_informations?.platform || null;
 
-      // Si Navitia ne l'a pas, on va chercher dans les panneaux Infogare de la gare
-      if (!quai && garesPanneaux.length > 0) {
-        const heureStr = `${heureDep}:${minDep}`;
-        
-        // Match par numéro de train exact ou par horaire de départ
-        const matchPanneau = garesPanneaux.find((p) => {
-          const numPaco = String(p.num || '').trim();
-          const numSNCF = String(numTrain || '').trim();
-          const matchNum = numPaco && numSNCF && (numPaco === numSNCF);
-          
-          const matchHeure = p.heure && p.heure.startsWith(heureStr);
-          return matchNum || matchHeure;
+      // 2. Sinon, croisement avec le flux departures de la gare
+      if (!quai && departuresList.length > 0) {
+        const matchDep = departuresList.find((d) => {
+          const depHead = d.display_informations?.headsign;
+          const depTrip = d.display_informations?.trip_short_name;
+          const depTime = d.stop_date_time?.departure_date_time;
+
+          const sameNum = numTrain && (numTrain === depHead || numTrain === depTrip);
+          const sameTime = depTime && depTime.substring(0, 13) === rawDep.substring(0, 13);
+
+          return sameNum || sameTime;
         });
 
-        if (matchPanneau && matchPanneau.voie) {
-          quai = String(matchPanneau.voie).trim();
+        if (matchDep) {
+          quai = matchDep.display_informations?.platform ||
+                 matchDep.stop_point?.platform ||
+                 null;
+          
+          if (!quai) {
+            const label = matchDep.stop_point?.label || matchDep.stop_point?.name || '';
+            const matchVoie = label.match(/voie\s+([a-zA-Z0-9]+)/i);
+            if (matchVoie) quai = matchVoie[1];
+          }
         }
       }
 
-      // Nettoyage du libellé du quai
       if (quai) {
-        quai = quai.replace(/^Voie\s*/i, '').trim();
+        quai = String(quai).replace(/^Voie\s*/i, '').trim();
       }
 
       return {
