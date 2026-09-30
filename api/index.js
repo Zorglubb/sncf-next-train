@@ -47,7 +47,7 @@ export default async function handler(req) {
       dateSNCF = now.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
   }
 
-  // Trajets directs uniquement (count augmenté à 10 pour compenser le filtrage des Intercités et cars)
+  // Trajets directs uniquement, pas de cars
   const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=10&max_nb_transfers=0&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
   
   try {
@@ -66,7 +66,7 @@ export default async function handler(req) {
         });
     }
 
-    // Filtrage strict : UNIQUEMENT les TER (exclusion cars, bus et Intercités)
+    // Filtrage : on enlève les cars et les Intercités
     const terOnlyTrains = data.journeys.filter(journey => {
         const trainSection = journey.sections?.find(s => s.type === 'public_transport') || journey.sections?.[0];
         if (!trainSection) return false;
@@ -78,27 +78,23 @@ export default async function handler(req) {
         const physical = (info.physical_mode || '').toLowerCase();
         const network = (info.network || '').toLowerCase();
         const label = (info.label || '').toLowerCase();
+        const headsign = (info.headsign || '').toLowerCase();
 
-        // Éliminer cars et bus
+        // 1. Exclure cars / bus
         const isCoachOrBus = physical.includes('coach') || physical.includes('bus') || commercial.includes('car');
         if (isCoachOrBus) return false;
 
-        // Éliminer les Intercités
-        const isIntercites = commercial.includes('intercités') || 
-                             commercial.includes('intercites') || 
-                             network.includes('intercités') || 
-                             network.includes('intercites') ||
-                             label.includes('intercités');
+        // 2. Exclure les Intercités (trains 44xx / 45xx ou mentionnés Intercités)
+        const isIntercites = commercial.includes('intercité') || 
+                             commercial.includes('intercite') || 
+                             network.includes('intercité') || 
+                             network.includes('intercite') ||
+                             label.includes('intercité') ||
+                             headsign.startsWith('44') ||
+                             headsign.startsWith('45');
         if (isIntercites) return false;
 
-        // Conserver si explicitement mentionné comme TER ou train régional
-        const isTer = commercial.includes('ter') || 
-                      network.includes('ter') || 
-                      label.includes('ter') || 
-                      physical.includes('local') || 
-                      physical.includes('regional');
-
-        return isTer;
+        return true;
     });
 
     const selectedJourneys = terOnlyTrains.slice(0, 4);
