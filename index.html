@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Prochains Trains</title>
   <script>
-    // Mesure du début de chargement de la page
     window.t_start = performance.now();
   </script>
   <style>
@@ -97,10 +96,10 @@
       line-height: 1.1;
       font-variant-numeric: tabular-nums;
     }
-    .time-arrivee {
+    .train-sub {
       font-size: 0.85rem;
       color: var(--muted);
-      margin-top: 2px;
+      margin-top: 3px;
     }
     .status-col {
       text-align: right;
@@ -118,9 +117,13 @@
     }
     .badge.on-time { background: rgba(74, 222, 128, 0.15); color: var(--success); }
     .badge.late { background: rgba(248, 113, 113, 0.15); color: var(--warning); }
-    .duration {
+    .badge-track {
       font-size: 0.8rem;
-      color: var(--muted);
+      font-weight: 700;
+      color: #cbd5e1;
+      background: #1e293b;
+      padding: 2px 8px;
+      border-radius: 6px;
     }
     .btn-more {
       width: 100%;
@@ -157,6 +160,10 @@
       font-weight: 600;
       cursor: pointer;
       font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
     }
     .btn-action:active {
       background: #64748b;
@@ -179,14 +186,14 @@
     </div>
 
     <div class="train-list" id="trains-container">
-      <div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des trains...</div>
+      <div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des départs...</div>
     </div>
 
     <button id="btn-see-more" class="btn-more" onclick="loadMore()">+ Voir 4 trains de plus</button>
 
     <div class="btn-group">
       <button class="btn-action" onclick="initView()">🔄 Actualiser</button>
-      <button class="btn-action" onclick="toggleDirection()">⇄ Inverser</button>
+      <button class="btn-action" id="btn-switch" onclick="toggleDirection()">➔ --</button>
     </div>
 
     <div id="perf" class="perf-tracker">Mesure en cours...</div>
@@ -197,17 +204,30 @@
     let lastDepartureRaw = null;
     let initialDay = null;
 
+    function updateSwitchButton(targetCity) {
+      const switchBtn = document.getElementById('btn-switch');
+      // Le bouton propose d'aller vers l'AUTRE ville
+      if (targetCity.toLowerCase().includes('bourges')) {
+        switchBtn.textContent = '➔ Vierzon';
+      } else {
+        switchBtn.textContent = '➔ Bourges';
+      }
+    }
+
     function createTrainRow(train) {
       const row = document.createElement('div');
       row.className = 'train-row';
+      const voieBadge = train.voie ? `<span class="badge-track">${train.voie}</span>` : '';
+      const numTrain = train.numero ? `N° ${train.numero}` : 'TER';
+
       row.innerHTML = `
         <div class="time-col">
           <span class="time-depart">${train.depart}</span>
-          <span class="time-arrivee">Arrivée : ${train.arrivee}</span>
+          <span class="train-sub">${numTrain}</span>
         </div>
         <div class="status-col">
           <span class="badge ${train.estEnRetard ? 'late' : 'on-time'}">${train.retard}</span>
-          <span class="duration">${train.duree}</span>
+          ${voieBadge}
         </div>
       `;
       return row;
@@ -235,7 +255,7 @@
       moreBtn.style.display = 'block';
       moreBtn.disabled = false;
       moreBtn.textContent = '+ Voir 4 trains de plus';
-      container.innerHTML = '<div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des trains...</div>';
+      container.innerHTML = '<div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des départs...</div>';
 
       let url = '/api';
       if (overrideDirection) {
@@ -259,10 +279,13 @@
           dirElem.textContent = "Aucun train";
           container.innerHTML = `<div style="text-align:center; color: var(--warning); padding: 15px;">${data.error || 'Aucun train trouvé pour le moment'}</div>`;
           moreBtn.style.display = 'none';
+          if (data.destination) updateSwitchButton(data.destination);
           return;
         }
 
         dirElem.textContent = data.destination;
+        updateSwitchButton(data.destination);
+
         container.innerHTML = '';
 
         initialDay = data.trains[0].rawDeparture.substring(0, 8);
@@ -300,7 +323,7 @@
         const sameDayTrains = (data.trains || []).filter(t => t.rawDeparture.startsWith(initialDay));
 
         if (sameDayTrains.length === 0) {
-          moreBtn.textContent = 'Fin des trains pour aujourd’hui';
+          moreBtn.textContent = 'Fin des départs pour aujourd’hui';
           moreBtn.disabled = true;
           return;
         }
@@ -309,7 +332,7 @@
         lastDepartureRaw = sameDayTrains[sameDayTrains.length - 1].rawDeparture;
 
         if (sameDayTrains.length < (data.trains || []).length || !data.hasMore) {
-          moreBtn.textContent = 'Fin des trains pour aujourd’hui';
+          moreBtn.textContent = 'Fin des départs pour aujourd’hui';
           moreBtn.disabled = true;
         } else {
           moreBtn.disabled = false;
