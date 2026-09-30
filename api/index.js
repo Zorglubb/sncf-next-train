@@ -1,6 +1,15 @@
 // api/index.js
 
-export default async function handler(req, res) {
+export const config = {
+  runtime: 'edge',
+  regions: ['cdg1'],
+};
+
+export default async function handler(req) {
+  const { searchParams } = new URL(req.url);
+  const dirParam = searchParams.get('dir');
+  const fromDatetime = searchParams.get('from_datetime');
+
   // 1. Gares
   const GARE_VIERZON = 'stop_area:SNCF:87576009';
   const GARE_BOURGES = 'stop_area:SNCF:87576207';
@@ -21,43 +30,58 @@ export default async function handler(req, res) {
       destinationLabel = "Vierzon";
   }
 
-  if (req.query.dir === 'vierzon') {
+  if (dirParam === 'vierzon') {
       depart = GARE_BOURGES;
       arrivee = GARE_VIERZON;
       destinationLabel = "Vierzon";
-  } else if (req.query.dir === 'bourges') {
+  } else if (dirParam === 'bourges') {
       depart = GARE_VIERZON;
       arrivee = GARE_BOURGES;
       destinationLabel = "Bourges";
   }
 
-  // 3. Date / Heure de recherche
-  // Si le client fournit from_datetime (pour "voir plus"), on l'utilise, sinon heure actuelle
-  let dateSNCF;
-  if (req.query.from_datetime) {
-      dateSNCF = req.query.from_datetime;
-  } else {
+  // 3. Date / Heure
+  let dateSNCF = fromDatetime;
+  if (!dateSNCF) {
       const now = new Date();
       dateSNCF = now.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
   }
 
-  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=4`;
+  // Exclusion des autocars et bus à la source + trains directs uniquement
+  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=6&max_nb_transfers=0&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
   
   try {
     const sncfResponse = await fetch(sncfUrl, {
       method: 'GET',
       headers: {
-        'Authorization': 'Basic ' + Buffer.from(process.env.SNCF_API_KEY + ':').toString('base64')
+        'Authorization': 'Basic ' + btoa(process.env.SNCF_API_KEY + ':')
       }
     });
 
     const data = await sncfResponse.json();
 
     if (!data.journeys || data.journeys.length === 0) {
-        return res.status(200).json({ destination: destinationLabel, trains: [], hasMore: false });
+        return new Response(JSON.stringify({ destination: destinationLabel, trains: [], hasMore: false }), {
+          headers: { 'content-type': 'application/json' }
+        });
     }
 
-    const trains = data.journeys.map(journey => {
+    // Filtrage strict : éliminer tout autocar résiduel
+    const realTrains = data.journeys.filter(journey => {
+        const isCoach = journey.sections?.some(s => 
+            s.display_informations?.physical_mode?.toLowerCase().includes('coach') ||
+            s.display_informations?.physical_mode?.toLowerCase().includes('car') ||
+            s.display_informations?.physical_mode?.toLowerCase().includes('autocar') ||
+            s.display_informations?.commercial_mode?.toLowerCase().includes('car') ||
+            s.display_informations?.commercial_mode?.toLowerCase().includes('autocar')
+        );
+        return !isCoach;
+    });
+
+    // On ne garde que les 4 premiers après filtrage
+    const selectedJourneys = realTrains.slice(0, 4);
+
+    const trains = selectedJourneys.map(journey => {
         const rawTime = journey.departure_date_time;
         const heure = rawTime.substring(9, 11);
         const minute = rawTime.substring(11, 13);
@@ -66,7 +90,6 @@ export default async function handler(req, res) {
         const heureArr = rawArrival.substring(9, 11);
         const minArr = rawArrival.substring(11, 13);
 
-        // Date brute du départ pour pouvoir demander les suivants
         const departureIsoRaw = rawTime;
 
         // Calcul du retard
@@ -96,13 +119,18 @@ export default async function handler(req, res) {
         };
     });
 
-    return res.status(200).json({
+    return new Response(JSON.stringify({
         destination: destinationLabel,
         trains: trains,
-        hasMore: trains.length === 4
+        hasMore: realTrains.length >= 4
+    }), {
+      headers: { 'content-type': 'application/json' }
     });
 
   } catch (error) {
-    return res.status(500).json({ error: "Erreur lors de la récupération des trains" });
+    return new Response(JSON.stringify({ error: "Erreur de connexion" }), {
+      status: 500,
+      headers: { 'content-type': 'application/json' }
+    });
   }
 }
