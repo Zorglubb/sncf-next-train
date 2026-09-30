@@ -55,7 +55,7 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
-      margin-bottom: 20px;
+      margin-bottom: 14px;
     }
     .train-row {
       display: flex;
@@ -103,11 +103,25 @@
       font-size: 0.8rem;
       color: var(--muted);
     }
+    .btn-more {
+      width: 100%;
+      background: transparent;
+      border: 1px dashed var(--muted);
+      color: var(--muted);
+      padding: 10px;
+      border-radius: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 16px;
+    }
+    .btn-more:active {
+      background: rgba(255,255,255,0.05);
+    }
     .btn-group {
       display: flex;
       gap: 10px;
     }
-    button {
+    .btn-action {
       flex: 1;
       background: #475569;
       border: none;
@@ -118,7 +132,7 @@
       cursor: pointer;
       font-size: 0.95rem;
     }
-    button:active {
+    .btn-action:active {
       background: #64748b;
     }
   </style>
@@ -135,22 +149,26 @@
       <div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des trains...</div>
     </div>
 
+    <button id="btn-see-more" class="btn-more" onclick="loadMore()">+ Voir 4 trains de plus</button>
+
     <div class="btn-group">
-      <button onclick="fetchTrains()">🔄 Actualiser</button>
-      <button onclick="toggleDirection()">⇄ Inverser</button>
+      <button class="btn-action" onclick="resetAndFetch()">🔄 Actualiser</button>
+      <button class="btn-action" onclick="toggleDirection()">⇄ Inverser</button>
     </div>
   </div>
 
   <script>
     let overrideDirection = null;
+    let currentLimit = 4;
 
-    async function fetchTrains() {
+    async function fetchTrains(limit = 4) {
       const dirElem = document.getElementById('direction');
       const container = document.getElementById('trains-container');
+      const moreBtn = document.getElementById('btn-see-more');
 
-      let url = '/api';
+      let url = `/api?count=${limit}`;
       if (overrideDirection) {
-        url += `?dir=${overrideDirection}`;
+        url += `&dir=${overrideDirection}`;
       }
 
       try {
@@ -160,13 +178,14 @@
         if (data.error || !data.trains) {
           dirElem.textContent = "Aucun train";
           container.innerHTML = `<div style="text-align:center; color: var(--warning); padding: 15px;">${data.error || 'Erreur'}</div>`;
+          moreBtn.style.display = 'none';
           return;
         }
 
         dirElem.textContent = data.destination;
         container.innerHTML = '';
 
-        data.trains.forEach((train, index) => {
+        data.trains.forEach((train) => {
           const row = document.createElement('div');
           row.className = 'train-row';
           row.innerHTML = `
@@ -182,18 +201,38 @@
           container.appendChild(row);
         });
 
+        // Masquer le bouton si on a déjà chargé l'extension ou s'il n'y a plus de trains
+        if (limit > 4 || data.trains.length < 4) {
+          moreBtn.style.display = 'none';
+        } else {
+          moreBtn.style.display = 'block';
+          moreBtn.textContent = '+ Voir 4 trains de plus';
+        }
+
       } catch (err) {
         container.innerHTML = `<div style="text-align:center; color: var(--warning); padding: 15px;">Erreur de connexion</div>`;
       }
     }
 
+    function loadMore() {
+      const moreBtn = document.getElementById('btn-see-more');
+      moreBtn.textContent = 'Chargement...';
+      currentLimit = 8;
+      fetchTrains(currentLimit);
+    }
+
+    function resetAndFetch() {
+      currentLimit = 4;
+      fetchTrains(currentLimit);
+    }
+
     function toggleDirection() {
       const currentDir = document.getElementById('direction').textContent.toLowerCase();
       overrideDirection = currentDir.includes('bourges') ? 'vierzon' : 'bourges';
-      fetchTrains();
+      resetAndFetch();
     }
 
-    fetchTrains();
+    resetAndFetch();
   </script>
 </body>
 </html>
