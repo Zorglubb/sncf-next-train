@@ -91,7 +91,7 @@
       flex-direction: column;
     }
     .time-depart {
-      font-size: 1.6rem;
+      font-size: 1.7rem;
       font-weight: 800;
       line-height: 1.1;
       font-variant-numeric: tabular-nums;
@@ -99,14 +99,17 @@
     .train-sub {
       font-size: 0.85rem;
       color: var(--muted);
-      margin-top: 3px;
+      margin-top: 4px;
+    }
+    .train-sub strong {
+      color: var(--text);
     }
     .status-col {
       text-align: right;
       display: flex;
       flex-direction: column;
       align-items: flex-end;
-      gap: 4px;
+      gap: 6px;
     }
     .badge {
       display: inline-block;
@@ -118,7 +121,7 @@
     .badge.on-time { background: rgba(74, 222, 128, 0.15); color: var(--success); }
     .badge.late { background: rgba(248, 113, 113, 0.15); color: var(--warning); }
     .badge-track {
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       font-weight: 700;
       color: #cbd5e1;
       background: #1e293b;
@@ -186,7 +189,7 @@
     </div>
 
     <div class="train-list" id="trains-container">
-      <div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des départs...</div>
+      <div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des trains...</div>
     </div>
 
     <button id="btn-see-more" class="btn-more" onclick="loadMore()">+ Voir 4 trains de plus</button>
@@ -206,7 +209,6 @@
 
     function updateSwitchButton(targetCity) {
       const switchBtn = document.getElementById('btn-switch');
-      // Le bouton propose d'aller vers l'AUTRE ville
       if (targetCity.toLowerCase().includes('bourges')) {
         switchBtn.textContent = '➔ Vierzon';
       } else {
@@ -223,11 +225,14 @@
       row.innerHTML = `
         <div class="time-col">
           <span class="time-depart">${train.depart}</span>
-          <span class="train-sub">${numTrain}</span>
+          <span class="train-sub">Arrivée : <strong>${train.arrivee}</strong> (${train.duree})</span>
         </div>
         <div class="status-col">
           <span class="badge ${train.estEnRetard ? 'late' : 'on-time'}">${train.retard}</span>
-          ${voieBadge}
+          <div style="display: flex; gap: 6px; align-items: center;">
+            ${voieBadge}
+            <span style="font-size: 0.75rem; color: var(--muted);">${numTrain}</span>
+          </div>
         </div>
       `;
       return row;
@@ -255,7 +260,7 @@
       moreBtn.style.display = 'block';
       moreBtn.disabled = false;
       moreBtn.textContent = '+ Voir 4 trains de plus';
-      container.innerHTML = '<div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des départs...</div>';
+      container.innerHTML = '<div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des trains...</div>';
 
       let url = '/api';
       if (overrideDirection) {
