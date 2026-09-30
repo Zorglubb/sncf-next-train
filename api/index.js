@@ -10,11 +10,11 @@ export default async function handler(req) {
   const dirParam = searchParams.get('dir');
   const fromDatetime = searchParams.get('from_datetime');
 
-  // 1. Gares
+  // 1. Gares (Vierzon et Bourges)
   const GARE_VIERZON = 'stop_area:SNCF:87576009';
   const GARE_BOURGES = 'stop_area:SNCF:87576207';
   
-  // 2. Bascule selon l'heure
+  // 2. Bascule selon l'heure (Europe/Paris)
   const optionsDate = { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false };
   const currentHour = parseInt(new Intl.DateTimeFormat('fr-FR', optionsDate).format(new Date()), 10);
   
@@ -30,6 +30,7 @@ export default async function handler(req) {
       destinationLabel = "Vierzon";
   }
 
+  // Permet de forcer manuellement le sens
   if (dirParam === 'vierzon') {
       depart = GARE_BOURGES;
       arrivee = GARE_VIERZON;
@@ -78,7 +79,7 @@ export default async function handler(req) {
         return !isCoach;
     });
 
-    // On ne garde que les 4 premiers après filtrage
+    // On sélectionne les 4 premiers trains filtrés
     const selectedJourneys = realTrains.slice(0, 4);
 
     const trains = selectedJourneys.map(journey => {
@@ -92,7 +93,7 @@ export default async function handler(req) {
 
         const departureIsoRaw = rawTime;
 
-        // Calcul du retard
+        // Calcul du retard éventuel
         const theorie = journey.sections?.[0]?.base_departure_date_time;
         const reel = journey.sections?.[0]?.departure_date_time;
         let retardMinutes = 0;
