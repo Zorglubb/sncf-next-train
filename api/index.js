@@ -31,13 +31,17 @@ export default async function handler(req, res) {
       destinationLabel = "Bourges";
   }
 
-  // Nombre de trains demandé (4 par défaut, ou la valeur passée dans l'URL)
-  const count = parseInt(req.query.count, 10) || 4;
+  // 3. Date / Heure de recherche
+  // Si le client fournit from_datetime (pour "voir plus"), on l'utilise, sinon heure actuelle
+  let dateSNCF;
+  if (req.query.from_datetime) {
+      dateSNCF = req.query.from_datetime;
+  } else {
+      const now = new Date();
+      dateSNCF = now.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
+  }
 
-  // 3. Appel API SNCF
-  const now = new Date();
-  const dateSNCF = now.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
-  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=${count}`;
+  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=4`;
   
   try {
     const sncfResponse = await fetch(sncfUrl, {
@@ -50,7 +54,7 @@ export default async function handler(req, res) {
     const data = await sncfResponse.json();
 
     if (!data.journeys || data.journeys.length === 0) {
-        return res.status(200).json({ error: "Aucun train trouvé pour le moment" });
+        return res.status(200).json({ destination: destinationLabel, trains: [], hasMore: false });
     }
 
     const trains = data.journeys.map(journey => {
@@ -62,6 +66,10 @@ export default async function handler(req, res) {
         const heureArr = rawArrival.substring(9, 11);
         const minArr = rawArrival.substring(11, 13);
 
+        // Date brute du départ pour pouvoir demander les suivants
+        const departureIsoRaw = rawTime;
+
+        // Calcul du retard
         const theorie = journey.sections?.[0]?.base_departure_date_time;
         const reel = journey.sections?.[0]?.departure_date_time;
         let retardMinutes = 0;
@@ -81,6 +89,7 @@ export default async function handler(req, res) {
         return {
             depart: `${heure}:${minute}`,
             arrivee: `${heureArr}:${minArr}`,
+            rawDeparture: departureIsoRaw,
             retard: retardMinutes > 0 ? `+${retardMinutes} min` : "À l'heure",
             estEnRetard: retardMinutes > 0,
             duree: Math.round(journey.duration / 60) + " min"
@@ -89,7 +98,8 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
         destination: destinationLabel,
-        trains: trains
+        trains: trains,
+        hasMore: trains.length === 4
     });
 
   } catch (error) {
