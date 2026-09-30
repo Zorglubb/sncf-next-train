@@ -21,7 +21,6 @@ export default async function handler(req, res) {
       destinationLabel = "Vierzon";
   }
 
-  // Permet de forcer manuellement le sens avec ?dir=bourges ou ?dir=vierzon
   if (req.query.dir === 'vierzon') {
       depart = GARE_BOURGES;
       arrivee = GARE_VIERZON;
@@ -32,11 +31,13 @@ export default async function handler(req, res) {
       destinationLabel = "Bourges";
   }
 
+  // Nombre de trains demandé (4 par défaut, ou la valeur passée dans l'URL)
+  const count = parseInt(req.query.count, 10) || 4;
+
   // 3. Appel API SNCF
   const now = new Date();
   const dateSNCF = now.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
-  // On demande les prochains trajets
-  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=4`;
+  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=${count}`;
   
   try {
     const sncfResponse = await fetch(sncfUrl, {
@@ -52,8 +53,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ error: "Aucun train trouvé pour le moment" });
     }
 
-    // 4. On extrait les 4 prochains trains
-    const trains = data.journeys.slice(0, 4).map(journey => {
+    const trains = data.journeys.map(journey => {
         const rawTime = journey.departure_date_time;
         const heure = rawTime.substring(9, 11);
         const minute = rawTime.substring(11, 13);
@@ -62,7 +62,6 @@ export default async function handler(req, res) {
         const heureArr = rawArrival.substring(9, 11);
         const minArr = rawArrival.substring(11, 13);
 
-        // Calcul du retard
         const theorie = journey.sections?.[0]?.base_departure_date_time;
         const reel = journey.sections?.[0]?.departure_date_time;
         let retardMinutes = 0;
