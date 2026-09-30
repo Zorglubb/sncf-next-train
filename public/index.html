@@ -2,8 +2,70 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Prochains Trains</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Trains</title>
+
+  <!-- PWA & Plein écran mobile -->
+  <link rel="manifest" href="/manifest.json?v=3">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Trains">
+  <meta name="application-name" content="Trains">
+
+  <!-- Génération dynamique d'une vraie icône PNG pour Android et iOS -->
+  <link id="favicon" rel="icon" type="image/png">
+  <link id="apple-icon" rel="apple-touch-icon">
+
+  <script>
+    window.t_page_init = performance.now();
+
+    // Crée une vraie icône PNG en mémoire
+    function setupIcons() {
+      const c = document.createElement('canvas');
+      c.width = 192;
+      c.height = 192;
+      const ctx = c.getContext('2d');
+
+      // Fond arrondi sombre
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.roundRect(0, 0, 192, 192, 42);
+      ctx.fill();
+
+      // Dessin du train (bleu ciel)
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.roundRect(46, 36, 100, 100, 16);
+      ctx.fill();
+
+      // Vitre
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.roundRect(58, 48, 76, 40, 8);
+      ctx.fill();
+
+      // Phares
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.arc(68, 114, 8, 0, Math.PI * 2);
+      ctx.arc(124, 114, 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Rails
+      ctx.fillStyle = '#64748b';
+      ctx.fillRect(40, 148, 112, 8);
+      ctx.fillRect(52, 142, 8, 18);
+      ctx.fillRect(132, 142, 8, 18);
+
+      const pngUrl = c.toDataURL('image/png');
+      document.getElementById('favicon').href = pngUrl;
+      document.getElementById('apple-icon').href = pngUrl;
+    }
+    setupIcons();
+  </script>
+
   <style>
     :root {
       --bg: #0f172a;
@@ -15,6 +77,10 @@
       --success: #4ade80;
       --warning: #f87171;
     }
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
     body {
       margin: 0;
       min-height: 100vh;
@@ -25,7 +91,6 @@
       font-family: system-ui, -apple-system, sans-serif;
       color: var(--text);
       padding: 16px;
-      box-sizing: border-box;
     }
     .card {
       position: relative;
@@ -36,15 +101,14 @@
       width: 100%;
       max-width: 420px;
     }
-    /* Zone tactile invisible en haut à droite */
+    /* Déclencheur invisible pour le menu debug */
     .secret-trigger {
       position: absolute;
       top: 0;
       right: 0;
-      width: 54px;
-      height: 54px;
+      width: 56px;
+      height: 56px;
       cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
       user-select: none;
     }
     .header {
@@ -180,7 +244,6 @@
     .btn-action:active {
       background: #64748b;
     }
-    /* Masqué par défaut */
     .perf-tracker {
       display: none;
       margin-top: 18px;
@@ -206,7 +269,6 @@
 <body>
 
   <div class="card">
-    <!-- Déclencheur invisible -->
     <div class="secret-trigger" onclick="handleSecretClick()"></div>
 
     <div class="header">
@@ -233,7 +295,6 @@
     let lastDepartureRaw = null;
     let initialDay = null;
 
-    // Détection du triple tap sur la zone secrète
     let clickCount = 0;
     let clickTimer = null;
 
