@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Prochains Trains</title>
+  <script>
+    // Mesure du début de chargement de la page
+    window.t_start = performance.now();
+  </script>
   <style>
     :root {
       --bg: #0f172a;
@@ -60,7 +64,6 @@
       overflow-y: auto;
       padding-right: 4px;
     }
-    /* Scrollbar discrète */
     .train-list::-webkit-scrollbar {
       width: 6px;
     }
@@ -158,6 +161,13 @@
     .btn-action:active {
       background: #64748b;
     }
+    .perf-tracker {
+      margin-top: 14px;
+      font-size: 0.75rem;
+      color: #64748b;
+      font-family: monospace;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -178,12 +188,14 @@
       <button class="btn-action" onclick="initView()">🔄 Actualiser</button>
       <button class="btn-action" onclick="toggleDirection()">⇄ Inverser</button>
     </div>
+
+    <div id="perf" class="perf-tracker">Mesure en cours...</div>
   </div>
 
   <script>
     let overrideDirection = null;
     let lastDepartureRaw = null;
-    let initialDay = null; // Pour vérifier qu'on reste bien sur la journée en cours
+    let initialDay = null;
 
     function createTrainRow(train) {
       const row = document.createElement('div');
@@ -201,7 +213,6 @@
       return row;
     }
 
-    // Calcule la date + 1 minute au format SNCF AAAAMMJJTHHMMSS
     function getNextQueryDateTime(rawStr) {
       const y = parseInt(rawStr.substring(0,4));
       const m = parseInt(rawStr.substring(4,6)) - 1;
@@ -218,6 +229,7 @@
       const dirElem = document.getElementById('direction');
       const container = document.getElementById('trains-container');
       const moreBtn = document.getElementById('btn-see-more');
+      const perfElem = document.getElementById('perf');
 
       lastDepartureRaw = null;
       moreBtn.style.display = 'block';
@@ -230,9 +242,18 @@
         url += `?dir=${overrideDirection}`;
       }
 
+      const t_fetch_start = performance.now();
+
       try {
         const res = await fetch(url);
         const data = await res.json();
+
+        const t_fetch_end = performance.now();
+        const totalDuration = Math.round(t_fetch_end - window.t_start);
+        const apiDuration = Math.round(t_fetch_end - t_fetch_start);
+        const pageLoadDuration = Math.round(t_fetch_start - window.t_start);
+
+        perfElem.textContent = `⚡ Écran: ${pageLoadDuration}ms | 🚆 API: ${apiDuration}ms | Total: ${totalDuration}ms`;
 
         if (data.error || !data.trains || data.trains.length === 0) {
           dirElem.textContent = "Aucun train";
@@ -244,11 +265,8 @@
         dirElem.textContent = data.destination;
         container.innerHTML = '';
 
-        // On mémorise la date du jour du premier train pour ne pas déborder sur demain
         initialDay = data.trains[0].rawDeparture.substring(0, 8);
-
         data.trains.forEach(train => container.appendChild(createTrainRow(train)));
-
         lastDepartureRaw = data.trains[data.trains.length - 1].rawDeparture;
 
         if (!data.hasMore) {
@@ -279,7 +297,6 @@
         const res = await fetch(url);
         const data = await res.json();
 
-        // Filtrer les trains pour ne garder que ceux de la journée en cours
         const sameDayTrains = (data.trains || []).filter(t => t.rawDeparture.startsWith(initialDay));
 
         if (sameDayTrains.length === 0) {
@@ -307,6 +324,7 @@
     function toggleDirection() {
       const currentDir = document.getElementById('direction').textContent.toLowerCase();
       overrideDirection = currentDir.includes('bourges') ? 'vierzon' : 'bourges';
+      window.t_start = performance.now();
       initView();
     }
 
