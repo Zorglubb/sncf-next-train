@@ -14,29 +14,29 @@ export default async function handler(req) {
   const GARE_VIERZON = 'stop_area:SNCF:87576009';
   const GARE_BOURGES = 'stop_area:SNCF:87576207';
   
-  // 2. Bascule selon l'heure
+  // 2. Bascule selon l'heure (Europe/Paris)
   const optionsDate = { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false };
   const currentHour = parseInt(new Intl.DateTimeFormat('fr-FR', optionsDate).format(new Date()), 10);
   
-  let departStopArea, arriveeStopArea, destinationLabel;
+  let depart, arrivee, destinationLabel;
 
   if (currentHour >= 4 && currentHour < 13) {
-      departStopArea = GARE_VIERZON;
-      arriveeStopArea = GARE_BOURGES;
+      depart = GARE_VIERZON;
+      arrivee = GARE_BOURGES;
       destinationLabel = "Bourges";
   } else {
-      departStopArea = GARE_BOURGES;
-      arriveeStopArea = GARE_VIERZON;
+      depart = GARE_BOURGES;
+      arrivee = GARE_VIERZON;
       destinationLabel = "Vierzon";
   }
 
   if (dirParam === 'vierzon') {
-      departStopArea = GARE_BOURGES;
-      arriveeStopArea = GARE_VIERZON;
+      depart = GARE_BOURGES;
+      arrivee = GARE_VIERZON;
       destinationLabel = "Vierzon";
   } else if (dirParam === 'bourges') {
-      departStopArea = GARE_VIERZON;
-      arriveeStopArea = GARE_BOURGES;
+      depart = GARE_VIERZON;
+      arrivee = GARE_BOURGES;
       destinationLabel = "Bourges";
   }
 
@@ -47,8 +47,8 @@ export default async function handler(req) {
       dateSNCF = now.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
   }
 
-  // Requête directe sur le tableau des départs (beaucoup plus rapide que /journeys)
-  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/stop_areas/${departStopArea}/departures?from_datetime=${dateSNCF}&count=15&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
+  // Trajets directs uniquement (pas de correspondances) et exclusion bus/cars
+  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=6&max_nb_transfers=0&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
   
   try {
     const sncfResponse = await fetch(sncfUrl, {
@@ -60,46 +60,40 @@ export default async function handler(req) {
 
     const data = await sncfResponse.json();
 
-    if (!data.departures || data.departures.length === 0) {
+    if (!data.journeys || data.journeys.length === 0) {
         return new Response(JSON.stringify({ destination: destinationLabel, trains: [], hasMore: false }), {
           headers: { 'content-type': 'application/json' }
         });
     }
 
-    // Filtrer les départs pour ne garder que ceux qui s'arrêtent ou vont vers la gare d'arrivée voulue,
-    // et exclure les cars/bus
-    const relevantDepartures = data.departures.filter(dep => {
-        const info = dep.display_informations;
-        if (!info) return false;
-
-        const isBusOrCoach = 
-            info.physical_mode?.toLowerCase().includes('coach') ||
-            info.physical_mode?.toLowerCase().includes('car') ||
-            info.physical_mode?.toLowerCase().includes('bus') ||
-            info.commercial_mode?.toLowerCase().includes('car') ||
-            info.commercial_mode?.toLowerCase().includes('autocar');
-        if (isBusOrCoach) return false;
-
-        // Vérifier la destination ou le sens de circulation
-        const directionStr = (info.direction || '').toLowerCase();
-        const routeLabel = (dep.route?.name || '').toLowerCase();
-        const searchTarget = destinationLabel.toLowerCase();
-
-        return directionStr.includes(searchTarget) || 
-               routeLabel.includes(searchTarget) ||
-               (destinationLabel === "Bourges" && (directionStr.includes("nevers") || directionStr.includes("lyon") || directionStr.includes("montluçon"))) ||
-               (destinationLabel === "Vierzon" && (directionStr.includes("paris") || directionStr.includes("orléans") || directionStr.includes("tours") || directionStr.includes("nantes")));
+    // Filtrer pour éliminer les bus ou autocars
+    const realTrains = data.journeys.filter(journey => {
+        const isCoach = journey.sections?.some(s => 
+            s.display_informations?.physical_mode?.toLowerCase().includes('coach') ||
+            s.display_informations?.physical_mode?.toLowerCase().includes('car') ||
+            s.display_informations?.physical_mode?.toLowerCase().includes('bus') ||
+            s.display_informations?.commercial_mode?.toLowerCase().includes('car') ||
+            s.display_informations?.commercial_mode?.toLowerCase().includes('autocar')
+        );
+        return !isCoach;
     });
 
-    const selectedDepartures = relevantDepartures.slice(0, 4);
+    const selectedJourneys = realTrains.slice(0, 4);
 
-    const trains = selectedDepartures.map(dep => {
-        const rawTime = dep.stop_date_time?.departure_date_time || dep.stop_date_time?.base_departure_date_time;
-        const heure = rawTime.substring(9, 11);
-        const minute = rawTime.substring(11, 13);
+    const trains = selectedJourneys.map(journey => {
+        const rawDep = journey.departure_date_time;
+        const heureDep = rawDep.substring(9, 11);
+        const minDep = rawDep.substring(11, 13);
 
-        const theorie = dep.stop_date_time?.base_departure_date_time;
-        const reel = dep.stop_date_time?.departure_date_time;
+        const rawArr = journey.arrival_date_time;
+        const heureArr = rawArr.substring(9, 11);
+        const minArr = rawArr.substring(11, 13);
+
+        const trainSection = journey.sections?.find(s => s.type === 'public_transport') || journey.sections?.[0];
+
+        // Calcul du retard
+        const theorie = trainSection?.base_departure_date_time;
+        const reel = trainSection?.departure_date_time;
         let retardMinutes = 0;
         
         if (theorie && reel && theorie !== reel) {
@@ -114,16 +108,22 @@ export default async function handler(req) {
             retardMinutes = Math.round((dtReel - dtTheorie) / 60000);
         }
 
-        // Récupération de la voie / quai si disponible
-        const quai = dep.stop_point?.label?.match(/voie\s+([a-zA-Z0-9]+)/i)?.[0] || 
-                     dep.display_informations?.platform || 
+        // Voie
+        const quai = trainSection?.from?.stop_point?.label?.match(/voie\s+([a-zA-Z0-9]+)/i)?.[0] || 
+                     trainSection?.display_informations?.platform || 
                      null;
 
+        const numTrain = trainSection?.display_informations?.headsign || 
+                         trainSection?.display_informations?.trip_short_name || 
+                         trainSection?.display_informations?.code || '';
+
         return {
-            depart: `${heure}:${minute}`,
-            rawDeparture: rawTime,
+            depart: `${heureDep}:${minDep}`,
+            arrivee: `${heureArr}:${minArr}`,
+            rawDeparture: rawDep,
+            duree: Math.round(journey.duration / 60) + " min",
             voie: quai,
-            numero: dep.display_informations?.headsign || dep.display_informations?.code || '',
+            numero: numTrain,
             retard: retardMinutes > 0 ? `+${retardMinutes} min` : "À l'heure",
             estEnRetard: retardMinutes > 0
         };
@@ -132,7 +132,7 @@ export default async function handler(req) {
     return new Response(JSON.stringify({
         destination: destinationLabel,
         trains: trains,
-        hasMore: relevantDepartures.length >= 4
+        hasMore: realTrains.length >= 4
     }), {
       headers: { 'content-type': 'application/json' }
     });
