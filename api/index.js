@@ -108,6 +108,7 @@ export default async function handler(req) {
 
       const trainSection = journey.sections?.find((s) => s.type === 'public_transport') || journey.sections?.[0];
 
+      // Retard
       const theorie = trainSection?.base_departure_date_time;
       const reel = trainSection?.departure_date_time;
       let retardMinutes = 0;
@@ -132,10 +133,22 @@ export default async function handler(req) {
         retardMinutes = Math.round((dtReel - dtTheorie) / 60000);
       }
 
-      const quai =
-        trainSection?.from?.stop_point?.label?.match(/voie\s+([a-zA-Z0-9]+)/i)?.[0] ||
-        trainSection?.display_informations?.platform ||
-        null;
+      // Recherche exhaustive de la voie / quai
+      let quai = null;
+      const stopPoint = trainSection?.from?.stop_point;
+      const displayPlatform = trainSection?.display_informations?.platform;
+
+      if (displayPlatform) {
+        quai = displayPlatform.replace(/^Voie\s*/i, '').trim();
+      } else if (stopPoint?.platform) {
+        quai = String(stopPoint.platform).replace(/^Voie\s*/i, '').trim();
+      } else {
+        const label = stopPoint?.label || stopPoint?.name || '';
+        const match = label.match(/voie\s+([a-zA-Z0-9]+)/i);
+        if (match) {
+          quai = match[1];
+        }
+      }
 
       const numTrain =
         trainSection?.display_informations?.headsign ||
@@ -148,7 +161,7 @@ export default async function handler(req) {
         arrivee: `${heureArr}:${minArr}`,
         rawDeparture: rawDep,
         duree: Math.round(journey.duration / 60) + ' min',
-        voie: quai,
+        voie: quai ? `Voie ${quai}` : null,
         numero: numTrain,
         retard: retardMinutes > 0 ? `+${retardMinutes} min` : "À l'heure",
         estEnRetard: retardMinutes > 0,
