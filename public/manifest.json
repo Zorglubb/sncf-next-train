@@ -3,7 +3,7 @@
   "short_name": "Trains",
   "start_url": "/",
   "id": "/",
-  "display": "standalone",
+  "display": "minimal_ui",
   "orientation": "portrait",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
