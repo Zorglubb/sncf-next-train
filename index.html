@@ -33,7 +33,7 @@
       border-radius: 24px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.5);
       width: 100%;
-      max-width: 400px;
+      max-width: 420px;
     }
     .header {
       text-align: center;
@@ -56,6 +56,17 @@
       flex-direction: column;
       gap: 10px;
       margin-bottom: 14px;
+      max-height: 60vh;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    /* Scrollbar discrète */
+    .train-list::-webkit-scrollbar {
+      width: 6px;
+    }
+    .train-list::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 6px;
     }
     .train-row {
       display: flex;
@@ -64,6 +75,11 @@
       background: var(--row-bg);
       padding: 14px 16px;
       border-radius: 14px;
+      animation: fadeIn 0.25s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
     }
     .train-row:first-child {
       border-left: 4px solid var(--accent);
@@ -108,14 +124,21 @@
       background: transparent;
       border: 1px dashed var(--muted);
       color: var(--muted);
-      padding: 10px;
+      padding: 12px;
       border-radius: 12px;
       font-weight: 600;
       cursor: pointer;
       margin-bottom: 16px;
+      transition: all 0.2s;
     }
-    .btn-more:active {
-      background: rgba(255,255,255,0.05);
+    .btn-more:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .btn-more:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+      border-style: solid;
     }
     .btn-group {
       display: flex;
@@ -152,21 +175,102 @@
     <button id="btn-see-more" class="btn-more" onclick="loadMore()">+ Voir 4 trains de plus</button>
 
     <div class="btn-group">
-      <button class="btn-action" onclick="resetAndFetch()">🔄 Actualiser</button>
+      <button class="btn-action" onclick="initView()">🔄 Actualiser</button>
       <button class="btn-action" onclick="toggleDirection()">⇄ Inverser</button>
     </div>
   </div>
 
   <script>
     let overrideDirection = null;
-    let currentLimit = 4;
+    let lastDepartureRaw = null;
+    let initialDay = null; // Pour vérifier qu'on reste bien sur la journée en cours
 
-    async function fetchTrains(limit = 4) {
+    function createTrainRow(train) {
+      const row = document.createElement('div');
+      row.className = 'train-row';
+      row.innerHTML = `
+        <div class="time-col">
+          <span class="time-depart">${train.depart}</span>
+          <span class="time-arrivee">Arrivée : ${train.arrivee}</span>
+        </div>
+        <div class="status-col">
+          <span class="badge ${train.estEnRetard ? 'late' : 'on-time'}">${train.retard}</span>
+          <span class="duration">${train.duree}</span>
+        </div>
+      `;
+      return row;
+    }
+
+    // Calcule la date + 1 minute au format SNCF AAAAMMJJTHHMMSS
+    function getNextQueryDateTime(rawStr) {
+      const y = parseInt(rawStr.substring(0,4));
+      const m = parseInt(rawStr.substring(4,6)) - 1;
+      const d = parseInt(rawStr.substring(6,8));
+      const h = parseInt(rawStr.substring(9,11));
+      const min = parseInt(rawStr.substring(11,13));
+      const s = parseInt(rawStr.substring(13,15));
+      const date = new Date(Date.UTC(y, m, d, h, min, s));
+      date.setUTCMinutes(date.getUTCMinutes() + 1);
+      return date.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
+    }
+
+    async function initView() {
       const dirElem = document.getElementById('direction');
       const container = document.getElementById('trains-container');
       const moreBtn = document.getElementById('btn-see-more');
 
-      let url = `/api?count=${limit}`;
+      lastDepartureRaw = null;
+      moreBtn.style.display = 'block';
+      moreBtn.disabled = false;
+      moreBtn.textContent = '+ Voir 4 trains de plus';
+      container.innerHTML = '<div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des trains...</div>';
+
+      let url = '/api';
+      if (overrideDirection) {
+        url += `?dir=${overrideDirection}`;
+      }
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.error || !data.trains || data.trains.length === 0) {
+          dirElem.textContent = "Aucun train";
+          container.innerHTML = `<div style="text-align:center; color: var(--warning); padding: 15px;">${data.error || 'Aucun train trouvé pour le moment'}</div>`;
+          moreBtn.style.display = 'none';
+          return;
+        }
+
+        dirElem.textContent = data.destination;
+        container.innerHTML = '';
+
+        // On mémorise la date du jour du premier train pour ne pas déborder sur demain
+        initialDay = data.trains[0].rawDeparture.substring(0, 8);
+
+        data.trains.forEach(train => container.appendChild(createTrainRow(train)));
+
+        lastDepartureRaw = data.trains[data.trains.length - 1].rawDeparture;
+
+        if (!data.hasMore) {
+          moreBtn.style.display = 'none';
+        }
+      } catch (err) {
+        container.innerHTML = `<div style="text-align:center; color: var(--warning); padding: 15px;">Erreur de connexion</div>`;
+        moreBtn.style.display = 'none';
+      }
+    }
+
+    async function loadMore() {
+      const moreBtn = document.getElementById('btn-see-more');
+      const container = document.getElementById('trains-container');
+
+      if (!lastDepartureRaw) return;
+
+      moreBtn.disabled = true;
+      moreBtn.textContent = 'Chargement...';
+
+      const nextDateTime = getNextQueryDateTime(lastDepartureRaw);
+      let url = `/api?from_datetime=${nextDateTime}`;
       if (overrideDirection) {
         url += `&dir=${overrideDirection}`;
       }
@@ -175,64 +279,38 @@
         const res = await fetch(url);
         const data = await res.json();
 
-        if (data.error || !data.trains) {
-          dirElem.textContent = "Aucun train";
-          container.innerHTML = `<div style="text-align:center; color: var(--warning); padding: 15px;">${data.error || 'Erreur'}</div>`;
-          moreBtn.style.display = 'none';
+        // Filtrer les trains pour ne garder que ceux de la journée en cours
+        const sameDayTrains = (data.trains || []).filter(t => t.rawDeparture.startsWith(initialDay));
+
+        if (sameDayTrains.length === 0) {
+          moreBtn.textContent = 'Fin des trains pour aujourd’hui';
+          moreBtn.disabled = true;
           return;
         }
 
-        dirElem.textContent = data.destination;
-        container.innerHTML = '';
+        sameDayTrains.forEach(train => container.appendChild(createTrainRow(train)));
+        lastDepartureRaw = sameDayTrains[sameDayTrains.length - 1].rawDeparture;
 
-        data.trains.forEach((train) => {
-          const row = document.createElement('div');
-          row.className = 'train-row';
-          row.innerHTML = `
-            <div class="time-col">
-              <span class="time-depart">${train.depart}</span>
-              <span class="time-arrivee">Arrivée : ${train.arrivee}</span>
-            </div>
-            <div class="status-col">
-              <span class="badge ${train.estEnRetard ? 'late' : 'on-time'}">${train.retard}</span>
-              <span class="duration">${train.duree}</span>
-            </div>
-          `;
-          container.appendChild(row);
-        });
-
-        // Masquer le bouton si on a déjà chargé l'extension ou s'il n'y a plus de trains
-        if (limit > 4 || data.trains.length < 4) {
-          moreBtn.style.display = 'none';
+        if (sameDayTrains.length < (data.trains || []).length || !data.hasMore) {
+          moreBtn.textContent = 'Fin des trains pour aujourd’hui';
+          moreBtn.disabled = true;
         } else {
-          moreBtn.style.display = 'block';
+          moreBtn.disabled = false;
           moreBtn.textContent = '+ Voir 4 trains de plus';
         }
-
       } catch (err) {
-        container.innerHTML = `<div style="text-align:center; color: var(--warning); padding: 15px;">Erreur de connexion</div>`;
+        moreBtn.textContent = 'Erreur lors du chargement';
+        moreBtn.disabled = false;
       }
-    }
-
-    function loadMore() {
-      const moreBtn = document.getElementById('btn-see-more');
-      moreBtn.textContent = 'Chargement...';
-      currentLimit = 8;
-      fetchTrains(currentLimit);
-    }
-
-    function resetAndFetch() {
-      currentLimit = 4;
-      fetchTrains(currentLimit);
     }
 
     function toggleDirection() {
       const currentDir = document.getElementById('direction').textContent.toLowerCase();
       overrideDirection = currentDir.includes('bourges') ? 'vierzon' : 'bourges';
-      resetAndFetch();
+      initView();
     }
 
-    resetAndFetch();
+    initView();
   </script>
 </body>
 </html>
