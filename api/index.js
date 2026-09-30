@@ -47,8 +47,8 @@ export default async function handler(req) {
       dateSNCF = now.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
   }
 
-  // Trajets directs uniquement (pas de correspondances) et exclusion bus/cars
-  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=6&max_nb_transfers=0&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
+  // Trajets directs uniquement (count augmenté à 10 pour compenser le filtrage des Intercités et cars)
+  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=10&max_nb_transfers=0&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
   
   try {
     const sncfResponse = await fetch(sncfUrl, {
@@ -66,19 +66,42 @@ export default async function handler(req) {
         });
     }
 
-    // Filtrer pour éliminer les bus ou autocars
-    const realTrains = data.journeys.filter(journey => {
-        const isCoach = journey.sections?.some(s => 
-            s.display_informations?.physical_mode?.toLowerCase().includes('coach') ||
-            s.display_informations?.physical_mode?.toLowerCase().includes('car') ||
-            s.display_informations?.physical_mode?.toLowerCase().includes('bus') ||
-            s.display_informations?.commercial_mode?.toLowerCase().includes('car') ||
-            s.display_informations?.commercial_mode?.toLowerCase().includes('autocar')
-        );
-        return !isCoach;
+    // Filtrage strict : UNIQUEMENT les TER (exclusion cars, bus et Intercités)
+    const terOnlyTrains = data.journeys.filter(journey => {
+        const trainSection = journey.sections?.find(s => s.type === 'public_transport') || journey.sections?.[0];
+        if (!trainSection) return false;
+
+        const info = trainSection.display_informations;
+        if (!info) return false;
+
+        const commercial = (info.commercial_mode || '').toLowerCase();
+        const physical = (info.physical_mode || '').toLowerCase();
+        const network = (info.network || '').toLowerCase();
+        const label = (info.label || '').toLowerCase();
+
+        // Éliminer cars et bus
+        const isCoachOrBus = physical.includes('coach') || physical.includes('bus') || commercial.includes('car');
+        if (isCoachOrBus) return false;
+
+        // Éliminer les Intercités
+        const isIntercites = commercial.includes('intercités') || 
+                             commercial.includes('intercites') || 
+                             network.includes('intercités') || 
+                             network.includes('intercites') ||
+                             label.includes('intercités');
+        if (isIntercites) return false;
+
+        // Conserver si explicitement mentionné comme TER ou train régional
+        const isTer = commercial.includes('ter') || 
+                      network.includes('ter') || 
+                      label.includes('ter') || 
+                      physical.includes('local') || 
+                      physical.includes('regional');
+
+        return isTer;
     });
 
-    const selectedJourneys = realTrains.slice(0, 4);
+    const selectedJourneys = terOnlyTrains.slice(0, 4);
 
     const trains = selectedJourneys.map(journey => {
         const rawDep = journey.departure_date_time;
@@ -108,7 +131,7 @@ export default async function handler(req) {
             retardMinutes = Math.round((dtReel - dtTheorie) / 60000);
         }
 
-        // Voie
+        // Voie / quai
         const quai = trainSection?.from?.stop_point?.label?.match(/voie\s+([a-zA-Z0-9]+)/i)?.[0] || 
                      trainSection?.display_informations?.platform || 
                      null;
@@ -132,7 +155,7 @@ export default async function handler(req) {
     return new Response(JSON.stringify({
         destination: destinationLabel,
         trains: trains,
-        hasMore: realTrains.length >= 4
+        hasMore: terOnlyTrains.length >= 4
     }), {
       headers: { 'content-type': 'application/json' }
     });
