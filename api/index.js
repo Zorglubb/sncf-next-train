@@ -57,23 +57,15 @@ export default async function handler(req) {
   const authHeader = 'Basic ' + btoa(process.env.SNCF_API_KEY + ':');
 
   const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=10&max_nb_transfers=0&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
-  const departuresUrl = `https://api.sncf.com/v1/coverage/sncf/stop_areas/${depart}/departures?datetime=${dateSNCF}&count=25`;
-  const pacoUrl = `https://data.sncf.com/api/explore/v2.1/catalog/datasets/table-affichage-gares-departs/records?where=suggest(gare%2C%20%22${encodeURIComponent(gareOrigineNom)}%22)&limit=40`;
+  const pacoUrl = `https://data.sncf.com/api/explore/v2.1/catalog/datasets/table-affichage-gares-departs/records?q=${encodeURIComponent(gareOrigineNom)}&limit=50`;
 
   try {
-    const [sncfRes, depRes, pacoRes] = await Promise.all([
+    const [sncfRes, pacoRes] = await Promise.all([
       fetch(sncfUrl, { headers: { Authorization: authHeader } }),
-      fetch(departuresUrl, { headers: { Authorization: authHeader } }).catch(() => null),
       fetch(pacoUrl).catch(() => null)
     ]);
 
     const data = await sncfRes.json();
-
-    let departuresList = [];
-    if (depRes && depRes.ok) {
-      const depData = await depRes.json();
-      departuresList = depData.departures || [];
-    }
 
     let pacoList = [];
     if (pacoRes && pacoRes.ok) {
@@ -87,8 +79,8 @@ export default async function handler(req) {
       });
     }
 
-    // Filtrage strict : TER uniquement
-    const terOnlyTrains = data.journeys.filter((journey) => {
+    // Filtrage : trains uniquement (TER, Rémi Express 39xx inclus, exclusion stricte des bus/cars)
+    const validTrains = data.journeys.filter((journey) => {
       const s = journey.sections?.find((sec) => sec.type === 'public_transport') || journey.sections?.[0];
       if (!s) return false;
       const info = s.display_informations;
@@ -96,15 +88,12 @@ export default async function handler(req) {
 
       const commercial = (info.commercial_mode || '').toLowerCase();
       const physical = (info.physical_mode || '').toLowerCase();
-      const headsign = (info.headsign || '').toLowerCase();
 
-      if (physical.includes('coach') || physical.includes('bus') || commercial.includes('car')) return false;
-      if (commercial.includes('intercité') || commercial.includes('intercite') || headsign.startsWith('44') || headsign.startsWith('45')) return false;
-
-      return true;
+      const isCoachOrBus = physical.includes('coach') || physical.includes('bus') || commercial.includes('car');
+      return !isCoachOrBus;
     });
 
-    const selectedJourneys = terOnlyTrains.slice(0, 4);
+    const selectedJourneys = validTrains.slice(0, 4);
 
     const trains = selectedJourneys.map((journey) => {
       const rawDep = journey.departure_date_time;
@@ -140,48 +129,27 @@ export default async function handler(req) {
                      s?.display_informations?.trip_short_name || 
                      s?.display_informations?.code || '';
 
-      // Nettoyer pour n'avoir que les chiffres (ex: "861412")
       const numMatch = numTrain.match(/\d{4,6}/);
       const numTrainPure = numMatch ? numMatch[0] : numTrain;
 
-      // RECHERCHE DE LA VOIE :
-      let quaiTrouve = null;
+      // Recherche de la voie
+      let quaiTrouve = s?.display_informations?.platform || null;
 
-      // Source 1 : Section directe
-      if (s?.display_informations?.platform) {
-        quaiTrouve = s.display_informations.platform;
-      }
-
-      // Source 2 : Table des départs Navitia
-      if (!quaiTrouve && departuresList.length > 0) {
-        const depMatch = departuresList.find((d) => {
-          const dHead = d.display_informations?.headsign || '';
-          const dTrip = d.display_informations?.trip_short_name || '';
-          const dTime = d.stop_date_time?.departure_date_time || '';
-          return (numTrainPure && (dHead.includes(numTrainPure) || dTrip.includes(numTrainPure))) ||
-                 (dTime.substring(9, 13) === rawDep.substring(9, 13));
-        });
-
-        if (depMatch) {
-          quaiTrouve = depMatch.display_informations?.platform ||
-                       depMatch.stop_point?.platform || null;
-        }
-      }
-
-      // Source 3 : Panneaux d'affichage en gare Gares & Connexions
       if (!quaiTrouve && pacoList.length > 0) {
-        const pacoMatch = pacoList.find((p) => {
+        const matchPaco = pacoList.find((p) => {
           const pNum = String(p.num || '').trim();
           const pHeure = String(p.heure || '').trim();
-          return (numTrainPure && pNum === numTrainPure) || pHeure.startsWith(heureExacte);
+          
+          const matchNum = numTrainPure && pNum === numTrainPure;
+          const matchHoraire = pHeure.startsWith(heureExacte);
+          return matchNum || matchHoraire;
         });
 
-        if (pacoMatch && pacoMatch.voie) {
-          quaiTrouve = pacoMatch.voie;
+        if (matchPaco && matchPaco.voie) {
+          quaiTrouve = matchPaco.voie;
         }
       }
 
-      // Formatage final
       let quaiPropre = null;
       if (quaiTrouve) {
         quaiPropre = String(quaiTrouve).replace(/^Voie\s*/i, '').trim();
@@ -202,15 +170,9 @@ export default async function handler(req) {
 
     if (debugMode) {
       return new Response(JSON.stringify({
-        gareOrigineNom,
-        pacoRecordsFound: pacoList.length,
-        pacoSample: pacoList.slice(0, 3),
-        departuresFound: departuresList.length,
-        departuresSample: departuresList.slice(0, 2).map(d => ({
-          headsign: d.display_informations?.headsign,
-          platform: d.display_informations?.platform,
-          stop_platform: d.stop_point?.platform
-        })),
+        gareOrigine: gareOrigineNom,
+        pacoCount: pacoList.length,
+        pacoRecords: pacoList.map(p => ({ num: p.num, heure: p.heure, voie: p.voie, destination: p.origdest })),
         trains
       }, null, 2), {
         headers: { 'content-type': 'application/json' },
@@ -221,7 +183,7 @@ export default async function handler(req) {
       JSON.stringify({
         destination: destinationLabel,
         trains: trains,
-        hasMore: terOnlyTrains.length >= 4,
+        hasMore: validTrains.length >= 4,
       }),
       {
         headers: { 'content-type': 'application/json' },
