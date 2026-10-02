@@ -9,6 +9,7 @@ export default async function handler(req) {
   const { searchParams } = new URL(req.url);
   const dirParam = searchParams.get('dir');
   const fromDatetime = searchParams.get('from_datetime');
+  const forceTestRetard = searchParams.get('test_retard') === '1';
 
   // Gares SNCF
   const GARE_VIERZON = 'stop_area:SNCF:87576009';
@@ -117,7 +118,7 @@ export default async function handler(req) {
       );
     };
 
-    const trains = selectedJourneys.map((journey) => {
+    const trains = selectedJourneys.map((journey, idx) => {
       const s = journey.sections?.find((sec) => sec.type === 'public_transport') || journey.sections?.[0];
 
       const rawDep = journey.departure_date_time || s?.departure_date_time;
@@ -129,7 +130,7 @@ export default async function handler(req) {
       const heureArr = rawArr.substring(9, 11);
       const minArr = rawArr.substring(11, 13);
 
-      // Calcul 1 : Différence classique entre heure théorique et heure recalculée
+      // Calcul standard : différence horaire théorique / réelle
       const thStr = journey.base_departure_date_time || s?.base_departure_date_time;
       const reStr = journey.departure_date_time || s?.departure_date_time;
 
@@ -142,7 +143,7 @@ export default async function handler(req) {
         }
       }
 
-      // Calcul 2 : Recherche dans les perturbations / disruptions (ex : Régulation de trafic)
+      // Détection des messages d'incidents / perturbations
       let motifPerturbation = null;
       const disruptionIds = [
         ...(journey.disruption_ids || []),
@@ -153,15 +154,12 @@ export default async function handler(req) {
         disruptionIds.forEach((id) => {
           const dObj = disruptionsList.find((item) => item.id === id);
           if (dObj) {
-            // Recherche de texte de retard éventuel (ex: "Retard estimé à 5 min")
             const textContent = (dObj.messages || []).map((m) => m.text).join(' ');
             const matchMin = textContent.match(/retard.*?(\d+)\s*min/i);
             if (matchMin) {
               const rMin = parseInt(matchMin[1], 10);
               if (rMin > retardMinutes) retardMinutes = rMin;
             }
-
-            // Détection cause
             if (dObj.cause) {
               motifPerturbation = dObj.cause;
             }
@@ -196,6 +194,12 @@ export default async function handler(req) {
         retardLabel = `+${retardMinutes} min`;
       } else if (motifPerturbation) {
         retardLabel = "Perturbé";
+      }
+
+      // SIMULATION TEMPORAIRE si ?test_retard=1
+      if (forceTestRetard && idx === 0) {
+        retardMinutes = 5;
+        retardLabel = "+5 min";
       }
 
       return {
