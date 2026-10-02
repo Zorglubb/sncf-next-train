@@ -48,7 +48,7 @@ export default async function handler(req) {
   }
 
   const authHeader = 'Basic ' + btoa(process.env.SNCF_API_KEY + ':');
-  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=10&max_nb_transfers=0&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
+  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=20&max_nb_transfers=0&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
 
   try {
     const sncfRes = await fetch(sncfUrl, {
@@ -63,46 +63,51 @@ export default async function handler(req) {
       });
     }
 
-    // Filtrage fin : TER + Rémi Express (39xx), exclusion cars et vrais Intercités (44xx, 45xx)
-    const validTrains = data.journeys.filter((journey) => {
+    const filteredTrains = data.journeys.filter((journey) => {
       const s = journey.sections?.find((sec) => sec.type === 'public_transport') || journey.sections?.[0];
       if (!s) return false;
       const info = s.display_informations;
       if (!info) return false;
 
-      const commercial = (info.commercial_mode || '').toLowerCase();
       const physical = (info.physical_mode || '').toLowerCase();
-      const headsign = (info.headsign || '').toLowerCase();
-      const tripShort = (info.trip_short_name || '').toLowerCase();
+      const commercial = (info.commercial_mode || '').toLowerCase();
+      const headsign = (info.headsign || '').trim();
+      const tripShort = (info.trip_short_name || '').trim();
 
-      // Exclusion bus et cars
+      // 1. Rejeter autocars / bus
       if (physical.includes('coach') || physical.includes('bus') || commercial.includes('car')) {
         return false;
       }
 
-      // Autoriser explicitement les Rémi Express (série 39xx)
-      const isRemiExpress = headsign.startsWith('39') || tripShort.startsWith('39');
-      if (isRemiExpress) {
+      // 2. Extraire le numéro de train
+      let num = headsign;
+      if (!/^\d+$/.test(num)) {
+        num = tripShort;
+      }
+      if (!/^\d+$/.test(num)) {
+        const match = (s.id || '').match(/(\d{4,6})/);
+        num = match ? match[1] : '';
+      }
+
+      // 3. Accepter explicitement les Rémi Express (ligne Paris-Bourges série 39xx)
+      if (num.startsWith('39')) {
         return true;
       }
 
-      // Bloquer les vrais Intercités (ex: transversale Nantes-Lyon 44xx / 45xx)
-      const isIntercites =
-        commercial.includes('intercit') ||
-        (info.network || '').toLowerCase().includes('intercit') ||
-        headsign.startsWith('44') ||
-        headsign.startsWith('45') ||
-        tripShort.startsWith('44') ||
-        tripShort.startsWith('45');
+      // 4. Bloquer les vrais Intercités nationaux (Nantes - Lyon : séries 44xx et 45xx)
+      if (num.startsWith('44') || num.startsWith('45')) {
+        return false;
+      }
 
-      if (isIntercites) {
+      // 5. Bloquer tout train dont le label commercial est strictement "intercités" sauf s'il s'agit d'un 39xx
+      if (commercial.includes('intercit') && !num.startsWith('39')) {
         return false;
       }
 
       return true;
     });
 
-    const selectedJourneys = validTrains.slice(0, 4);
+    const selectedJourneys = filteredTrains.slice(0, 4);
 
     const trains = selectedJourneys.map((journey) => {
       const rawDep = journey.departure_date_time;
@@ -116,7 +121,7 @@ export default async function handler(req) {
 
       const s = journey.sections?.find((sec) => sec.type === 'public_transport') || journey.sections?.[0];
 
-      // Calcul du retard
+      // Retard
       const theorie = s?.base_departure_date_time;
       const reel = s?.departure_date_time;
       let retardMinutes = 0;
@@ -133,7 +138,6 @@ export default async function handler(req) {
         retardMinutes = Math.round((dtReel - dtTheorie) / 60000);
       }
 
-      // Numéro de train propre
       let numTrain = s?.display_informations?.headsign || 
                      s?.display_informations?.trip_short_name || 
                      s?.display_informations?.code || '';
@@ -141,7 +145,6 @@ export default async function handler(req) {
       const numMatch = numTrain.match(/\d{4,6}/);
       const numTrainPure = numMatch ? numMatch[0] : numTrain;
 
-      // Voie / Quai si jamais fourni par l'API
       let quai = s?.display_informations?.platform || s?.from?.stop_point?.platform || null;
       if (quai) {
         quai = String(quai).replace(/^Voie\s*/i, '').trim();
@@ -164,7 +167,7 @@ export default async function handler(req) {
       JSON.stringify({
         destination: destinationLabel,
         trains: trains,
-        hasMore: validTrains.length >= 4,
+        hasMore: filteredTrains.length >= 4,
       }),
       {
         headers: { 'content-type': 'application/json' },
