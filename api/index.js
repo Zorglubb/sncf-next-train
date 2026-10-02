@@ -9,7 +9,6 @@ export default async function handler(req) {
   const { searchParams } = new URL(req.url);
   const dirParam = searchParams.get('dir');
   const fromDatetime = searchParams.get('from_datetime');
-  const forceTestRetard = searchParams.get('test_retard') === '1';
 
   // Gares SNCF
   const GARE_VIERZON = 'stop_area:SNCF:87576009';
@@ -96,7 +95,7 @@ export default async function handler(req) {
         return true;
       }
 
-      // 4. Écarter INTERCITÉS
+      // 4. Écarter les vrais INTERCITÉS nationaux (44xx, 45xx)
       if (commercial.includes('intercit') || network.includes('intercit') || num.startsWith('44') || num.startsWith('45')) {
         return false;
       }
@@ -118,7 +117,7 @@ export default async function handler(req) {
       );
     };
 
-    const trains = selectedJourneys.map((journey, idx) => {
+    const trains = selectedJourneys.map((journey) => {
       const s = journey.sections?.find((sec) => sec.type === 'public_transport') || journey.sections?.[0];
 
       const rawDep = journey.departure_date_time || s?.departure_date_time;
@@ -194,12 +193,6 @@ export default async function handler(req) {
         retardLabel = `+${retardMinutes} min`;
       } else if (motifPerturbation) {
         retardLabel = "Perturbé";
-      }
-
-      // SIMULATION TEMPORAIRE si ?test_retard=1
-      if (forceTestRetard && idx === 0) {
-        retardMinutes = 5;
-        retardLabel = "+5 min";
       }
 
       return {
