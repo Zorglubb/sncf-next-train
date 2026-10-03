@@ -9,6 +9,7 @@ export default async function handler(req) {
   const { searchParams } = new URL(req.url);
   const dirParam = searchParams.get('dir');
   const fromDatetime = searchParams.get('from_datetime');
+  const offset = parseInt(searchParams.get('offset') || '0', 10);
 
   const GARE_VIERZON = 'stop_area:SNCF:87576009';
   const GARE_BOURGES = 'stop_area:SNCF:87576207';
@@ -45,7 +46,7 @@ export default async function handler(req) {
   }
 
   const authHeader = 'Basic ' + btoa(process.env.SNCF_API_KEY + ':');
-  const departuresUrl = `https://api.sncf.com/v1/coverage/sncf/stop_areas/${depart}/departures?datetime=${dateSNCF}&count=25&data_freshness=realtime`;
+  const departuresUrl = `https://api.sncf.com/v1/coverage/sncf/stop_areas/${depart}/departures?datetime=${dateSNCF}&count=40&data_freshness=realtime`;
 
   try {
     const res = await fetch(departuresUrl, {
@@ -80,7 +81,7 @@ export default async function handler(req) {
       return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     };
 
-    // Filtrer les départs vers la bonne destination
+    // Filtrer les départs vers la destination
     const targetTrains = departures.filter((dep) => {
       const info = dep.display_informations;
       if (!info) return false;
@@ -107,9 +108,8 @@ export default async function handler(req) {
       return true;
     });
 
-    const selectedDepartures = targetTrains.slice(0, 4);
+    const selectedDepartures = targetTrains.slice(offset, offset + 4);
 
-    // Récupérer l'arrêt d'arrivée pour chaque train en parallèle
     const trains = await Promise.all(
       selectedDepartures.map(async (dep) => {
         const info = dep.display_informations || {};
@@ -130,7 +130,6 @@ export default async function handler(req) {
           }
         }
 
-        // Messages d'incidents / perturbations
         const disruptionList = data.disruptions || [];
         const dIds = dep.disruption_ids || [];
         let isPerturbed = false;
@@ -148,9 +147,8 @@ export default async function handler(req) {
           }
         }
 
-        // Récupération de l'heure d'arrivée via vehicle_journey
         let heureBaseArr = null;
-        let dureeMin = 18; // Valeur nominale Vierzon - Bourges si indisponible
+        let dureeMin = 18;
         const vjLink = dep.links?.find((l) => l.type === 'vehicle_journey');
 
         if (vjLink) {
@@ -182,7 +180,6 @@ export default async function handler(req) {
           heureBaseArr = new Date(dateBaseDep.getTime() + dureeMin * 60000);
         }
 
-        // Calculs des heures réelles avec retard
         const dateReelleDep = new Date(dateBaseDep.getTime() + retardMinutes * 60000);
         const dateReelleArr = new Date(heureBaseArr.getTime() + retardMinutes * 60000);
 
@@ -223,7 +220,7 @@ export default async function handler(req) {
       JSON.stringify({
         destination: destinationLabel,
         trains: trains,
-        hasMore: targetTrains.length >= 4,
+        hasMore: targetTrains.length > offset + 4,
       }),
       {
         headers: { 'content-type': 'application/json' },
