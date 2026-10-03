@@ -11,24 +11,28 @@
       padding: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
+    html, body {
+      height: 100%;
+    }
     body {
-      background-color: #0b111e;
+      background-color: #0d131f;
       color: #ffffff;
       display: flex;
       justify-content: center;
-      padding: 24px 16px;
+      align-items: center; /* Centré au milieu de l'écran */
+      padding: 16px;
     }
     .widget {
       width: 100%;
-      max-width: 400px;
-      background: #151d2a;
-      border-radius: 20px;
-      padding: 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      max-width: 380px;
+      background: #141c2b;
+      border-radius: 24px;
+      padding: 24px 20px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.6);
     }
     .header {
       text-align: center;
-      margin-bottom: 20px;
+      margin-bottom: 22px;
     }
     .header-sub {
       font-size: 11px;
@@ -43,7 +47,7 @@
       margin-top: 4px;
     }
     .train-card {
-      background: #1e293b;
+      background: #1c2637;
       border-radius: 14px;
       padding: 14px 16px;
       margin-bottom: 12px;
@@ -62,7 +66,7 @@
     .times-col {
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 4px;
     }
     .dep-row {
       display: flex;
@@ -75,19 +79,19 @@
       color: #ffffff;
     }
     .time-main.delayed {
-      color: #f97316; /* Orange SNCF */
+      color: #f97316;
     }
     .time-strike {
-      font-size: 14px;
+      font-size: 13px;
       color: #64748b;
       text-decoration: line-through;
     }
     .arr-row {
-      font-size: 13px;
+      font-size: 12px;
       color: #94a3b8;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
     }
     .arr-time.delayed {
       color: #f97316;
@@ -101,9 +105,9 @@
       gap: 6px;
     }
     .badge {
-      font-size: 12px;
-      font-weight: 600;
-      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 8px;
       border-radius: 6px;
     }
     .badge.ontime {
@@ -119,24 +123,46 @@
       color: #f87171;
     }
     .train-num {
-      font-size: 12px;
+      font-size: 11px;
       color: #64748b;
+    }
+    .btn-more {
+      width: 100%;
+      background: transparent;
+      border: 1px dashed #334155;
+      color: #94a3b8;
+      padding: 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 14px;
+    }
+    .btn-more:hover {
+      background: #1e293b;
+      color: #ffffff;
     }
     .actions {
       display: flex;
       gap: 10px;
-      margin-top: 16px;
     }
     .btn {
       flex: 1;
-      padding: 10px;
-      border-radius: 10px;
+      padding: 11px;
+      border-radius: 12px;
       border: none;
-      background: #334155;
+      background: #273449;
       color: #ffffff;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn:active {
+      transform: scale(0.98);
     }
   </style>
 </head>
@@ -149,27 +175,25 @@
 
     <div id="trainsContainer">Chargement...</div>
 
+    <button id="btnMore" class="btn-more" style="display: none;" onclick="loadMoreTrains()">
+      + Voir 4 trains de plus
+    </button>
+
     <div class="actions">
-      <button class="btn" onclick="fetchTrains()">🔄 Actualiser</button>
-      <button class="btn" id="toggleDirBtn" onclick="toggleDir()">⇄ Inverser</button>
+      <button class="btn" onclick="refreshTrains()">🔄 Actualiser</button>
+      <button class="btn" id="toggleDirBtn" onclick="toggleDir()">→ Vierzon</button>
     </div>
   </div>
 
   <script>
     let currentDir = null;
+    let currentOffset = 0;
 
-    async function fetchTrains() {
-      const urlParams = new URLSearchParams(window.location.search);
-      if (currentDir) urlParams.set('dir', currentDir);
-      
-      const res = await fetch('/api?' + urlParams.toString());
-      const data = await res.json();
-
-      document.getElementById('destinationLabel').innerText = data.destination;
+    function renderTrains(trains, append = false) {
       const container = document.getElementById('trainsContainer');
-      container.innerHTML = '';
+      if (!append) container.innerHTML = '';
 
-      data.trains.forEach((t) => {
+      trains.forEach((t) => {
         const isLate = t.estEnRetard && t.retardMinutes > 0;
         const isCanc = t.estSupprime;
 
@@ -203,13 +227,44 @@
       });
     }
 
+    async function fetchTrains(append = false) {
+      const params = new URLSearchParams(window.location.search);
+      if (currentDir) params.set('dir', currentDir);
+      params.set('offset', currentOffset);
+
+      const res = await fetch('/api?' + params.toString());
+      const data = await res.json();
+
+      document.getElementById('destinationLabel').innerText = data.destination;
+
+      // Bouton directionnel : propose la direction opposée
+      const isBourges = data.destination.toLowerCase().includes('bourges');
+      document.getElementById('toggleDirBtn').innerText = isBourges ? '→ Vierzon' : '→ Bourges';
+
+      renderTrains(data.trains, append);
+
+      const btnMore = document.getElementById('btnMore');
+      btnMore.style.display = data.hasMore ? 'block' : 'none';
+    }
+
+    function refreshTrains() {
+      currentOffset = 0;
+      fetchTrains(false);
+    }
+
+    function loadMoreTrains() {
+      currentOffset += 4;
+      fetchTrains(true);
+    }
+
     function toggleDir() {
       const current = document.getElementById('destinationLabel').innerText.toLowerCase();
       currentDir = current.includes('bourges') ? 'vierzon' : 'bourges';
-      fetchTrains();
+      currentOffset = 0;
+      fetchTrains(false);
     }
 
-    fetchTrains();
+    fetchTrains(false);
   </script>
 </body>
 </html>
