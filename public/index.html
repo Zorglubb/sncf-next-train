@@ -2,134 +2,98 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Trains</title>
-
-  <!-- PWA & Métadonnées -->
-  <link rel="manifest" href="/manifest.json?v=5">
-  <meta name="theme-color" content="#0f172a">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Trains">
-  <meta name="application-name" content="Trains">
-
-  <!-- Icônes -->
-  <link rel="icon" type="image/svg+xml" href="/api/icon">
-  <link rel="apple-touch-icon" href="/api/icon">
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prochains Départs</title>
   <style>
-    :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --row-bg: #334155;
-      --text: #f8fafc;
-      --muted: #94a3b8;
-      --accent: #38bdf8;
-      --success: #4ade80;
-      --warning: #f87171;
-    }
     * {
       box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     body {
-      margin: 0;
-      min-height: 100vh;
+      background-color: #0b111e;
+      color: #ffffff;
       display: flex;
       justify-content: center;
-      align-items: center;
-      background: var(--bg);
-      font-family: system-ui, -apple-system, sans-serif;
-      color: var(--text);
-      padding: 16px;
+      padding: 24px 16px;
     }
-    .card {
-      position: relative;
-      background: var(--card-bg);
-      padding: 24px;
-      border-radius: 24px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    .widget {
       width: 100%;
-      max-width: 420px;
-    }
-    /* Déclencheur invisible pour le menu debug */
-    .secret-trigger {
-      position: absolute;
-      top: 0;
-      right: 0;
-      width: 56px;
-      height: 56px;
-      cursor: pointer;
-      user-select: none;
+      max-width: 400px;
+      background: #151d2a;
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     }
     .header {
       text-align: center;
       margin-bottom: 20px;
     }
-    .destination {
-      font-size: 0.95rem;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 1px;
+    .header-sub {
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      color: #64748b;
+      font-weight: 700;
     }
-    .target-city {
-      font-size: 1.8rem;
-      font-weight: 800;
-      color: var(--accent);
+    .header-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #38bdf8;
       margin-top: 4px;
     }
-    .train-list {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      margin-bottom: 14px;
-      max-height: 60vh;
-      overflow-y: auto;
-      padding-right: 4px;
-    }
-    .train-list::-webkit-scrollbar {
-      width: 6px;
-    }
-    .train-list::-webkit-scrollbar-thumb {
-      background: #475569;
-      border-radius: 6px;
-    }
-    .train-row {
+    .train-card {
+      background: #1e293b;
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: var(--row-bg);
-      padding: 14px 16px;
-      border-radius: 14px;
-      animation: fadeIn 0.25s ease-in-out;
+      border-left: 4px solid #38bdf8;
     }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: translateY(0); }
+    .train-card.delayed {
+      border-left-color: #f97316;
     }
-    .train-row:first-child {
-      border-left: 4px solid var(--accent);
+    .train-card.cancelled {
+      border-left-color: #ef4444;
+      opacity: 0.6;
     }
-    .time-col {
+    .times-col {
       display: flex;
       flex-direction: column;
+      gap: 3px;
     }
-    .time-depart {
-      font-size: 1.7rem;
-      font-weight: 800;
-      line-height: 1.1;
-      font-variant-numeric: tabular-nums;
+    .dep-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
     }
-    .train-sub {
-      font-size: 0.85rem;
-      color: var(--muted);
-      margin-top: 4px;
+    .time-main {
+      font-size: 22px;
+      font-weight: 700;
+      color: #ffffff;
     }
-    .train-sub strong {
-      color: var(--text);
+    .time-main.delayed {
+      color: #f97316; /* Orange SNCF */
     }
-    .status-col {
+    .time-strike {
+      font-size: 14px;
+      color: #64748b;
+      text-decoration: line-through;
+    }
+    .arr-row {
+      font-size: 13px;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .arr-time.delayed {
+      color: #f97316;
+      font-weight: 600;
+    }
+    .right-col {
       text-align: right;
       display: flex;
       flex-direction: column;
@@ -137,295 +101,115 @@
       gap: 6px;
     }
     .badge {
-      display: inline-block;
-      padding: 4px 10px;
-      border-radius: 9999px;
+      font-size: 12px;
       font-weight: 600;
-      font-size: 0.85rem;
-    }
-    .badge.on-time { background: rgba(74, 222, 128, 0.15); color: var(--success); }
-    .badge.late { background: rgba(248, 113, 113, 0.15); color: var(--warning); }
-    
-    /* Badge de Voie / Quai mis en valeur */
-    .badge-track {
-      font-size: 0.78rem;
-      font-weight: 800;
-      color: #38bdf8;
-      background: rgba(56, 189, 248, 0.15);
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      padding: 2px 7px;
+      padding: 3px 8px;
       border-radius: 6px;
-      letter-spacing: 0.5px;
     }
-    .btn-more {
-      width: 100%;
-      background: transparent;
-      border: 1px dashed var(--muted);
-      color: var(--muted);
-      padding: 12px;
-      border-radius: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      margin-bottom: 16px;
-      transition: all 0.2s;
+    .badge.ontime {
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
     }
-    .btn-more:hover {
-      border-color: var(--accent);
-      color: var(--accent);
+    .badge.delayed {
+      background: rgba(249, 115, 22, 0.15);
+      color: #fb923c;
     }
-    .btn-more:disabled {
-      cursor: not-allowed;
-      opacity: 0.5;
-      border-style: solid;
+    .badge.cancelled {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
     }
-    .btn-group {
+    .train-num {
+      font-size: 12px;
+      color: #64748b;
+    }
+    .actions {
       display: flex;
       gap: 10px;
+      margin-top: 16px;
     }
-    .btn-action {
+    .btn {
       flex: 1;
-      background: #475569;
+      padding: 10px;
+      border-radius: 10px;
       border: none;
-      color: var(--text);
-      padding: 12px;
-      border-radius: 12px;
+      background: #334155;
+      color: #ffffff;
+      font-size: 13px;
       font-weight: 600;
       cursor: pointer;
-      font-size: 0.95rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-    }
-    .btn-action:active {
-      background: #64748b;
-    }
-    /* Menu debug masqué */
-    .perf-tracker {
-      display: none;
-      margin-top: 18px;
-      padding: 10px 14px;
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid #334155;
-      border-radius: 12px;
-      font-size: 0.75rem;
-      color: #94a3b8;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      text-align: center;
-      line-height: 1.5;
-      animation: fadeIn 0.2s ease;
-    }
-    .perf-tracker .perf-main {
-      font-size: 0.85rem;
-      font-weight: 700;
-      color: var(--accent);
-      margin-top: 2px;
     }
   </style>
 </head>
 <body>
-
-  <div class="card">
-    <div class="secret-trigger" onclick="handleSecretClick()"></div>
-
+  <div class="widget">
     <div class="header">
-      <div class="destination">Direction</div>
-      <div class="target-city" id="direction">Chargement...</div>
+      <div class="header-sub">DIRECTION</div>
+      <div class="header-title" id="destinationLabel">Bourges</div>
     </div>
 
-    <div class="train-list" id="trains-container">
-      <div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des trains...</div>
+    <div id="trainsContainer">Chargement...</div>
+
+    <div class="actions">
+      <button class="btn" onclick="fetchTrains()">🔄 Actualiser</button>
+      <button class="btn" id="toggleDirBtn" onclick="toggleDir()">⇄ Inverser</button>
     </div>
-
-    <button id="btn-see-more" class="btn-more" onclick="loadMore()">+ Voir 4 trains de plus</button>
-
-    <div class="btn-group">
-      <button class="btn-action" onclick="initView()">🔄 Actualiser</button>
-      <button class="btn-action" id="btn-switch" onclick="toggleDirection()">➔ --</button>
-    </div>
-
-    <div id="perf" class="perf-tracker">Mesure en cours...</div>
   </div>
 
   <script>
-    let overrideDirection = null;
-    let lastDepartureRaw = null;
-    let initialDay = null;
+    let currentDir = null;
 
-    let clickCount = 0;
-    let clickTimer = null;
+    async function fetchTrains() {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (currentDir) urlParams.set('dir', currentDir);
+      
+      const res = await fetch('/api?' + urlParams.toString());
+      const data = await res.json();
 
-    function handleSecretClick() {
-      clickCount++;
-      clearTimeout(clickTimer);
+      document.getElementById('destinationLabel').innerText = data.destination;
+      const container = document.getElementById('trainsContainer');
+      container.innerHTML = '';
 
-      clickTimer = setTimeout(() => {
-        clickCount = 0;
-      }, 800);
+      data.trains.forEach((t) => {
+        const isLate = t.estEnRetard && t.retardMinutes > 0;
+        const isCanc = t.estSupprime;
 
-      if (clickCount >= 3) {
-        const perfElem = document.getElementById('perf');
-        perfElem.style.display = (perfElem.style.display === 'block') ? 'none' : 'block';
-        clickCount = 0;
-      }
-    }
+        const card = document.createElement('div');
+        card.className = `train-card ${isLate ? 'delayed' : ''} ${isCanc ? 'cancelled' : ''}`;
 
-    function updateSwitchButton(targetCity) {
-      const switchBtn = document.getElementById('btn-switch');
-      if (targetCity.toLowerCase().includes('bourges')) {
-        switchBtn.textContent = '➔ Vierzon';
-      } else {
-        switchBtn.textContent = '➔ Bourges';
-      }
-    }
-
-    function createTrainRow(train) {
-      const row = document.createElement('div');
-      row.className = 'train-row';
-      const voieBadge = train.voie ? `<span class="badge-track">${train.voie}</span>` : '';
-      const numTrain = train.numero ? `N° ${train.numero}` : 'TER';
-
-      row.innerHTML = `
-        <div class="time-col">
-          <span class="time-depart">${train.depart}</span>
-          <span class="train-sub">Arrivée : <strong>${train.arrivee}</strong> (${train.duree})</span>
-        </div>
-        <div class="status-col">
-          <span class="badge ${train.estEnRetard ? 'late' : 'on-time'}">${train.retard}</span>
-          <div style="display: flex; gap: 6px; align-items: center;">
-            ${voieBadge}
-            <span style="font-size: 0.75rem; color: var(--muted);">${numTrain}</span>
+        card.innerHTML = `
+          <div class="times-col">
+            <div class="dep-row">
+              <span class="time-main ${isLate ? 'delayed' : ''}">
+                ${isLate ? t.departReel : t.departTheorique}
+              </span>
+              ${isLate ? `<span class="time-strike">${t.departTheorique}</span>` : ''}
+            </div>
+            <div class="arr-row">
+              Arrivée : 
+              <span class="arr-time ${isLate ? 'delayed' : ''}">
+                ${isLate ? t.arriveeReelle : t.arriveeTheorique}
+              </span>
+              <span>(${t.duree})</span>
+            </div>
           </div>
-        </div>
-      `;
-      return row;
-    }
-
-    function getNextQueryDateTime(rawStr) {
-      const y = parseInt(rawStr.substring(0, 4));
-      const m = parseInt(rawStr.substring(4, 6)) - 1;
-      const d = parseInt(rawStr.substring(6, 8));
-      const h = parseInt(rawStr.substring(9, 11));
-      const min = parseInt(rawStr.substring(11, 13));
-      const s = parseInt(rawStr.substring(13, 15));
-      const date = new Date(Date.UTC(y, m, d, h, min, s));
-      date.setUTCMinutes(date.getUTCMinutes() + 1);
-      return date.toISOString().replace(/[-:]/g, '').split('.')[0] + "Z";
-    }
-
-    async function initView() {
-      const t_click = performance.now();
-
-      const dirElem = document.getElementById('direction');
-      const container = document.getElementById('trains-container');
-      const moreBtn = document.getElementById('btn-see-more');
-      const perfElem = document.getElementById('perf');
-
-      lastDepartureRaw = null;
-      moreBtn.style.display = 'block';
-      moreBtn.disabled = false;
-      moreBtn.textContent = '+ Voir 4 trains de plus';
-      container.innerHTML = '<div style="text-align: center; color: var(--muted); padding: 20px;">Recherche des trains...</div>';
-
-      let url = '/api';
-      if (overrideDirection) {
-        url += `?dir=${overrideDirection}`;
-      }
-
-      const t_fetch_start = performance.now();
-
-      try {
-        const res = await fetch(url);
-        const data = await res.json();
-
-        const t_fetch_end = performance.now();
-
-        if (data.error || !data.trains || data.trains.length === 0) {
-          dirElem.textContent = 'Aucun train';
-          container.innerHTML = `<div style="text-align:center; color: var(--warning); padding: 15px;">${data.error || 'Aucun train trouvé pour le moment'}</div>`;
-          moreBtn.style.display = 'none';
-          if (data.destination) updateSwitchButton(data.destination);
-          return;
-        }
-
-        dirElem.textContent = data.destination;
-        updateSwitchButton(data.destination);
-
-        container.innerHTML = '';
-
-        initialDay = data.trains[0].rawDeparture.substring(0, 8);
-        data.trains.forEach((train) => container.appendChild(createTrainRow(train)));
-        lastDepartureRaw = data.trains[data.trains.length - 1].rawDeparture;
-
-        if (!data.hasMore) {
-          moreBtn.style.display = 'none';
-        }
-
-        const t_dom_end = performance.now();
-        const apiDuration = Math.round(t_fetch_end - t_fetch_start);
-        const domRender = Math.max(1, Math.round(t_dom_end - t_fetch_end));
-        const totalDuration = Math.round(t_dom_end - t_click);
-
-        perfElem.innerHTML = `
-          <div>⚡ Rendu : ${domRender} ms &nbsp;|&nbsp; 🚆 API : ${apiDuration} ms</div>
-          <div class="perf-main">Temps total : ${totalDuration} ms</div>
+          <div class="right-col">
+            <span class="badge ${isCanc ? 'cancelled' : isLate ? 'delayed' : 'ontime'}">
+              ${t.retard}
+            </span>
+            <span class="train-num">N° ${t.numero}</span>
+          </div>
         `;
-      } catch (err) {
-        container.innerHTML = `<div style="text-align:center; color: var(--warning); padding: 15px;">Erreur de connexion</div>`;
-        moreBtn.style.display = 'none';
-      }
+        container.appendChild(card);
+      });
     }
 
-    async function loadMore() {
-      const moreBtn = document.getElementById('btn-see-more');
-      const container = document.getElementById('trains-container');
-
-      if (!lastDepartureRaw) return;
-
-      moreBtn.disabled = true;
-      moreBtn.textContent = 'Chargement...';
-
-      const nextDateTime = getNextQueryDateTime(lastDepartureRaw);
-      let url = `/api?from_datetime=${nextDateTime}`;
-      if (overrideDirection) {
-        url += `&dir=${overrideDirection}`;
-      }
-
-      try {
-        const res = await fetch(url);
-        const data = await res.json();
-
-        const sameDayTrains = (data.trains || []).filter((t) => t.rawDeparture.startsWith(initialDay));
-
-        if (sameDayTrains.length === 0) {
-          moreBtn.textContent = 'Fin des trains pour aujourd’hui';
-          moreBtn.disabled = true;
-          return;
-        }
-
-        sameDayTrains.forEach((train) => container.appendChild(createTrainRow(train)));
-        lastDepartureRaw = sameDayTrains[sameDayTrains.length - 1].rawDeparture;
-
-        if (sameDayTrains.length < (data.trains || []).length || !data.hasMore) {
-          moreBtn.textContent = 'Fin des trains pour aujourd’hui';
-          moreBtn.disabled = true;
-        } else {
-          moreBtn.disabled = false;
-          moreBtn.textContent = '+ Voir 4 trains de plus';
-        }
-      } catch (err) {
-        moreBtn.textContent = 'Erreur lors du chargement';
-        moreBtn.disabled = false;
-      }
+    function toggleDir() {
+      const current = document.getElementById('destinationLabel').innerText.toLowerCase();
+      currentDir = current.includes('bourges') ? 'vierzon' : 'bourges';
+      fetchTrains();
     }
 
-    function toggleDirection() {
-      const currentDir = document.getElementById('direction').textContent.toLowerCase();
-      overrideDirection = currentDir.includes('bourges') ? 'vierzon' : 'bourges';
-      initView();
-    }
-
-    initView();
+    fetchTrains();
   </script>
 </body>
 </html>
