@@ -77,7 +77,7 @@ export default async function handler(req) {
       const headsign = (info.headsign || '').trim();
       const tripShort = (info.trip_short_name || '').trim();
 
-      // Exclusion bus et cars
+      // Exclusion bus/cars
       if (physical.includes('coach') || physical.includes('bus') || commercial.includes('car')) {
         return false;
       }
@@ -95,7 +95,7 @@ export default async function handler(req) {
         return true;
       }
 
-      // Écarter les Intercités nationaux (44xx, 45xx)
+      // Écarter strictement les Intercités nationaux (comme le 14:42 de la capture)
       if (commercial.includes('intercit') || network.includes('intercit') || num.startsWith('44') || num.startsWith('45')) {
         return false;
       }
@@ -105,36 +105,83 @@ export default async function handler(req) {
 
     const selectedJourneys = filteredTrains.slice(0, 4);
 
-    // Fonction d'analyse robuste compatible avec tous les formats de date SNCF
     const parseSncfDate = (str) => {
       if (!str) return null;
       const clean = str.replace(/[-:]/g, '');
       if (clean.length < 15) return null;
-      const year = parseInt(clean.substring(0, 4), 10);
-      const month = parseInt(clean.substring(4, 6), 10) - 1;
-      const day = parseInt(clean.substring(6, 8), 10);
-      const hour = parseInt(clean.substring(9, 11), 10);
+      const y = parseInt(clean.substring(0, 4), 10);
+      const m = parseInt(clean.substring(4, 6), 10) - 1;
+      const d = parseInt(clean.substring(6, 8), 10);
+      const h = parseInt(clean.substring(9, 11), 10);
       const min = parseInt(clean.substring(11, 13), 10);
-      const sec = parseInt(clean.substring(13, 15), 10);
-      return new Date(year, month, day, hour, min, sec);
+      const s = parseInt(clean.substring(13, 15), 10);
+      return new Date(y, m, d, h, min, s);
     };
 
     const trains = selectedJourneys.map((journey) => {
       const s = journey.sections?.find((sec) => sec.type === 'public_transport') || journey.sections?.[0];
-      const firstStop = s?.stop_date_times?.[0];
+      const stopTimes = s?.stop_date_times || [];
+      const firstStop = stopTimes[0];
 
-      // Extraction de l'heure brute
-      const rawDep = journey.departure_date_time || s?.departure_date_time || firstStop?.departure_date_time;
-      const depDate = parseSncfDate(rawDep);
+      // 1. Détection des heures de départ (théorique vs temps réel)
+      const depTheorique =
+        firstStop?.base_departure_date_time ||
+        s?.base_departure_date_time ||
+        journey.base_departure_date_time;
 
+      const depReel =
+        firstStop?.departure_date_time ||
+        s?.departure_date_time ||
+        journey.departure_date_time;
+
+      let retardMinutes = 0;
+      if (depTheorique && depReel) {
+        const dtTh = parseSncfDate(depTheorique);
+        const dtRe = parseSncfDate(depReel);
+        if (dtTh && dtRe) {
+          const diffMin = Math.round((dtRe.getTime() - dtTh.getTime()) / 60000);
+          if (diffMin > 0) {
+            retardMinutes = diffMin;
+          }
+        }
+      }
+
+      // 2. Détection via disruptions / régulation de trafic
+      let causePerturbation = null;
+      const dIds = [
+        ...(journey.disruption_ids || []),
+        ...(s?.display_informations?.disruption_ids || [])
+      ];
+
+      for (const id of dIds) {
+        const dObj = disruptionsList.find((item) => item.id === id);
+        if (dObj) {
+          const fullText = (dObj.messages || []).map((m) => m.text).join(' ');
+          
+          // Chercher "Retard estimé à X min", "+X min", etc.
+          const match = fullText.match(/(\d+)\s*(?:min|mn)/i);
+          if (match) {
+            const val = parseInt(match[1], 10);
+            if (val > retardMinutes) {
+              retardMinutes = val;
+            }
+          }
+          if (dObj.cause || dObj.severity?.name) {
+            causePerturbation = dObj.cause || dObj.severity?.name;
+          }
+        }
+      }
+
+      // Heure affichée : heure théorique
+      const baseDate = parseSncfDate(depTheorique || depReel);
       let heureDep = '00';
       let minDep = '00';
-      if (depDate) {
-        heureDep = String(depDate.getHours()).padStart(2, '0');
-        minDep = String(depDate.getMinutes()).padStart(2, '0');
+      if (baseDate) {
+        heureDep = String(baseDate.getHours()).padStart(2, '0');
+        minDep = String(baseDate.getMinutes()).padStart(2, '0');
       }
-      const heureAffichee = `${heureDep}:${minDep}`;
 
+      // Heure d'arrivée
       const rawArr = journey.arrival_date_time || s?.arrival_date_time;
       const arrDate = parseSncfDate(rawArr);
       let heureArr = '00';
@@ -144,55 +191,10 @@ export default async function handler(req) {
         minArr = String(arrDate.getMinutes()).padStart(2, '0');
       }
 
-      // 1. Calcul du retard par comparaison théorique / réel
-      const thStr = journey.base_departure_date_time || s?.base_departure_date_time || firstStop?.base_departure_date_time;
-      const reStr = journey.departure_date_time || s?.departure_date_time || firstStop?.departure_date_time;
-
-      let retardMinutes = 0;
-      if (thStr && reStr && thStr !== reStr) {
-        const dtTh = parseSncfDate(thStr);
-        const dtRe = parseSncfDate(reStr);
-        if (dtTh && dtRe) {
-          const diffMs = dtRe.getTime() - dtTh.getTime();
-          if (diffMs > 0) {
-            retardMinutes = Math.round(diffMs / 60000);
-          }
-        }
-      }
-
-      // 2. Recherche dans les perturbations / disruptions (ex. régulation de trafic)
-      let motifPerturbation = null;
-      const disruptionIds = [
-        ...(journey.disruption_ids || []),
-        ...(s?.display_informations?.disruption_ids || [])
-      ];
-
-      if (disruptionIds.length > 0) {
-        disruptionIds.forEach((id) => {
-          const dObj = disruptionsList.find((item) => item.id === id);
-          if (dObj) {
-            const textContent = (dObj.messages || []).map((m) => m.text).join(' ');
-            
-            // Capture les mentions textuelles de retard
-            const matchMin = textContent.match(/retard(?:\s+estim[ée])?(?:\s+[àa])?\s*(\d+)\s*m/i) ||
-                             textContent.match(/\+(\d+)\s*m/i);
-            if (matchMin) {
-              const rMin = parseInt(matchMin[1], 10);
-              if (rMin > retardMinutes) retardMinutes = rMin;
-            }
-
-            if (dObj.cause) {
-              motifPerturbation = dObj.cause;
-            }
-          }
-        });
-      }
-
-      // Statut supprimé
+      // Statut
       const isCancelled =
         journey.status === 'NO_SERVICE' ||
-        s?.display_informations?.status === 'DELETED' ||
-        (s?.display_informations?.headsign || '').toLowerCase().includes('supprim');
+        s?.display_informations?.status === 'DELETED';
 
       // Numéro de train
       let numTrain = s?.display_informations?.headsign || 
@@ -201,31 +203,24 @@ export default async function handler(req) {
       const numMatch = numTrain.match(/\d{4,6}/);
       const numTrainPure = numMatch ? numMatch[0] : numTrain;
 
-      // Voie si disponible
-      let quai = s?.display_informations?.platform || s?.from?.stop_point?.platform || null;
-      if (quai) {
-        quai = String(quai).replace(/^Voie\s*/i, '').trim();
-        quai = quai ? `Voie ${quai}` : null;
-      }
-
       let retardLabel = "À l'heure";
       if (isCancelled) {
         retardLabel = "Supprimé";
       } else if (retardMinutes > 0) {
         retardLabel = `+${retardMinutes} min`;
-      } else if (motifPerturbation) {
+      } else if (causePerturbation) {
         retardLabel = "Perturbé";
       }
 
       return {
-        depart: heureAffichee,
+        depart: `${heureDep}:${minDep}`,
         arrivee: `${heureArr}:${minArr}`,
-        rawDeparture: rawDep,
+        rawDeparture: depReel || depTheorique,
         duree: Math.round(journey.duration / 60) + ' min',
-        voie: quai,
+        voie: null,
         numero: numTrainPure || numTrain,
         retard: retardLabel,
-        estEnRetard: retardMinutes > 0 || isCancelled || motifPerturbation !== null,
+        estEnRetard: retardMinutes > 0 || isCancelled || causePerturbation !== null,
       };
     });
 
