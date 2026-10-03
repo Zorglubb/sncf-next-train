@@ -45,8 +45,7 @@ export default async function handler(req) {
   }
 
   const authHeader = 'Basic ' + btoa(process.env.SNCF_API_KEY + ':');
-  // data_freshness=realtime force l'extraction immédiate des retards et incidents
-  const departuresUrl = `https://api.sncf.com/v1/coverage/sncf/stop_areas/${depart}/departures?datetime=${dateSNCF}&count=30&data_freshness=realtime`;
+  const departuresUrl = `https://api.sncf.com/v1/coverage/sncf/stop_areas/${depart}/departures?datetime=${dateSNCF}&count=25&data_freshness=realtime`;
 
   try {
     const res = await fetch(departuresUrl, {
@@ -76,7 +75,12 @@ export default async function handler(req) {
       );
     };
 
-    // Filtrer les départs vers la destination souhaitée
+    const formatHHMM = (d) => {
+      if (!d) return '--:--';
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    };
+
+    // Filtrer les départs vers la bonne destination
     const targetTrains = departures.filter((dep) => {
       const info = dep.display_informations;
       if (!info) return false;
@@ -87,14 +91,8 @@ export default async function handler(req) {
       const headsign = (info.headsign || '').trim();
       const tripShort = (info.trip_short_name || '').trim();
 
-      // Vérifier si le train dessert la destination
-      const isGoodDirection = direction.includes(destinationLabel.toLowerCase());
-      if (!isGoodDirection) return false;
-
-      // Exclusion bus et cars
-      if (physical.includes('coach') || physical.includes('bus') || commercial.includes('car')) {
-        return false;
-      }
+      if (!direction.includes(destinationLabel.toLowerCase())) return false;
+      if (physical.includes('coach') || physical.includes('bus') || commercial.includes('car')) return false;
 
       let num = headsign;
       if (!/^\d+$/.test(num)) num = tripShort;
@@ -103,92 +101,123 @@ export default async function handler(req) {
         num = m ? m[1] : '';
       }
 
-      // Conserver les Rémi Express (39xx)
       if (num.startsWith('39')) return true;
-
-      // Écarter les Intercités nationaux (44xx, 45xx)[span_1](start_span)[span_1](end_span)
-      if (commercial.includes('intercit') || num.startsWith('44') || num.startsWith('45')) {
-        return false;
-      }
+      if (commercial.includes('intercit') || num.startsWith('44') || num.startsWith('45')) return false;
 
       return true;
     });
 
     const selectedDepartures = targetTrains.slice(0, 4);
 
-    const trains = selectedDepartures.map((dep) => {
-      const info = dep.display_informations || {};
-      const stopDateTime = dep.stop_date_time || {};
+    // Récupérer l'arrêt d'arrivée pour chaque train en parallèle
+    const trains = await Promise.all(
+      selectedDepartures.map(async (dep) => {
+        const info = dep.display_informations || {};
+        const stopDateTime = dep.stop_date_time || {};
 
-      const rawBaseDep = stopDateTime.base_departure_date_time;
-      const rawRealDep = stopDateTime.departure_date_time;
+        const rawBaseDep = stopDateTime.base_departure_date_time;
+        const rawRealDep = stopDateTime.departure_date_time;
 
-      const baseDate = parseSncfDate(rawBaseDep || rawRealDep);
-      let heureDep = '00';
-      let minDep = '00';
-      if (baseDate) {
-        heureDep = String(baseDate.getHours()).padStart(2, '0');
-        minDep = String(baseDate.getMinutes()).padStart(2, '0');
-      }
+        const dateBaseDep = parseSncfDate(rawBaseDep || rawRealDep);
+        let retardMinutes = 0;
 
-      // Calcul direct du retard en minutes
-      let retardMinutes = 0;
-      if (rawBaseDep && rawRealDep && rawBaseDep !== rawRealDep) {
-        const dtTh = parseSncfDate(rawBaseDep);
-        const dtRe = parseSncfDate(rawRealDep);
-        if (dtTh && dtRe) {
-          const diff = Math.round((dtRe.getTime() - dtTh.getTime()) / 60000);
-          if (diff > 0) retardMinutes = diff;
-        }
-      }
-
-      // Détection retard dans les messages de perturbation
-      const disruptionList = data.disruptions || [];
-      const dIds = dep.disruption_ids || [];
-      let isPerturbed = false;
-
-      for (const id of dIds) {
-        const dObj = disruptionList.find((item) => item.id === id);
-        if (dObj) {
-          const msg = (dObj.messages || []).map((m) => m.text).join(' ');
-          const matchMin = msg.match(/(\d+)\s*(?:min|mn)/i);
-          if (matchMin) {
-            const val = parseInt(matchMin[1], 10);
-            if (val > retardMinutes) retardMinutes = val;
+        if (rawBaseDep && rawRealDep && rawBaseDep !== rawRealDep) {
+          const dtTh = parseSncfDate(rawBaseDep);
+          const dtRe = parseSncfDate(rawRealDep);
+          if (dtTh && dtRe) {
+            const diff = Math.round((dtRe.getTime() - dtTh.getTime()) / 60000);
+            if (diff > 0) retardMinutes = diff;
           }
-          isPerturbed = true;
         }
-      }
 
-      const isCancelled =
-        dep.status === 'NO_SERVICE' ||
-        info.status === 'DELETED' ||
-        (info.headsign || '').toLowerCase().includes('supprim');
+        // Messages d'incidents / perturbations
+        const disruptionList = data.disruptions || [];
+        const dIds = dep.disruption_ids || [];
+        let isPerturbed = false;
 
-      let numTrain = info.headsign || info.trip_short_name || '';
-      const numMatch = numTrain.match(/\d{4,6}/);
-      const numTrainPure = numMatch ? numMatch[0] : numTrain;
+        for (const id of dIds) {
+          const dObj = disruptionList.find((item) => item.id === id);
+          if (dObj) {
+            const msg = (dObj.messages || []).map((m) => m.text).join(' ');
+            const matchMin = msg.match(/(\d+)\s*(?:min|mn)/i);
+            if (matchMin) {
+              const val = parseInt(matchMin[1], 10);
+              if (val > retardMinutes) retardMinutes = val;
+            }
+            isPerturbed = true;
+          }
+        }
 
-      let retardLabel = "À l'heure";
-      if (isCancelled) {
-        retardLabel = "Supprimé";
-      } else if (retardMinutes > 0) {
-        retardLabel = `+${retardMinutes} min`;
-      } else if (isPerturbed) {
-        retardLabel = "Perturbé";
-      }
+        // Récupération de l'heure d'arrivée via vehicle_journey
+        let heureBaseArr = null;
+        let dureeMin = 18; // Valeur nominale Vierzon - Bourges si indisponible
+        const vjLink = dep.links?.find((l) => l.type === 'vehicle_journey');
 
-      return {
-        depart: `${heureDep}:${minDep}`,
-        arrivee: '--:--',
-        rawDeparture: rawRealDep || rawBaseDep,
-        duree: '',
-        voie: null,
-        numero: numTrainPure || numTrain,
-        retard: retardLabel,
-        estEnRetard: retardMinutes > 0 || isCancelled || isPerturbed,
-      };
-    });
+        if (vjLink) {
+          try {
+            const vjRes = await fetch(
+              `https://api.sncf.com/v1/coverage/sncf/vehicle_journeys/${vjLink.id}?datetime=${dateSNCF}`,
+              { headers: { Authorization: authHeader } }
+            );
+            if (vjRes.ok) {
+              const vjData = await vjRes.json();
+              const stopPoints = vjData.vehicle_journeys?.[0]?.stop_times || [];
+              const destStop = stopPoints.find((st) => st.stop_point?.stop_area?.id === arrivee);
+
+              if (destStop) {
+                const arrRaw = destStop.base_arrival_time || destStop.arrival_time;
+                if (arrRaw && dateBaseDep) {
+                  const [ah, am] = arrRaw.split(':').map((x) => parseInt(x, 10));
+                  const dArr = new Date(dateBaseDep);
+                  dArr.setHours(ah, am, 0, 0);
+                  heureBaseArr = dArr;
+                  dureeMin = Math.round((dArr.getTime() - dateBaseDep.getTime()) / 60000);
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (!heureBaseArr && dateBaseDep) {
+          heureBaseArr = new Date(dateBaseDep.getTime() + dureeMin * 60000);
+        }
+
+        // Calculs des heures réelles avec retard
+        const dateReelleDep = new Date(dateBaseDep.getTime() + retardMinutes * 60000);
+        const dateReelleArr = new Date(heureBaseArr.getTime() + retardMinutes * 60000);
+
+        const isCancelled =
+          dep.status === 'NO_SERVICE' ||
+          info.status === 'DELETED' ||
+          (info.headsign || '').toLowerCase().includes('supprim');
+
+        let numTrain = info.headsign || info.trip_short_name || '';
+        const numMatch = numTrain.match(/\d{4,6}/);
+        const numTrainPure = numMatch ? numMatch[0] : numTrain;
+
+        let retardLabel = "À l'heure";
+        if (isCancelled) {
+          retardLabel = 'Supprimé';
+        } else if (retardMinutes > 0) {
+          retardLabel = `+${retardMinutes} min`;
+        } else if (isPerturbed) {
+          retardLabel = 'Perturbé';
+        }
+
+        return {
+          departTheorique: formatHHMM(dateBaseDep),
+          departReel: formatHHMM(dateReelleDep),
+          arriveeTheorique: formatHHMM(heureBaseArr),
+          arriveeReelle: formatHHMM(dateReelleArr),
+          duree: `${dureeMin} min`,
+          retardMinutes: retardMinutes,
+          numero: numTrainPure || numTrain,
+          retard: retardLabel,
+          estEnRetard: retardMinutes > 0 || isCancelled || isPerturbed,
+          estSupprime: isCancelled,
+        };
+      })
+    );
 
     return new Response(
       JSON.stringify({
