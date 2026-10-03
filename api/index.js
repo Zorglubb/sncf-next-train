@@ -14,9 +14,17 @@ export default async function handler(req) {
   const GARE_VIERZON = 'stop_area:SNCF:87576009';
   const GARE_BOURGES = 'stop_area:SNCF:87576207';
 
-  // Bascule selon l'heure (Europe/Paris)
+  // Heure locale France
   const optionsDate = { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false };
   const currentHour = parseInt(new Intl.DateTimeFormat('fr-FR', optionsDate).format(new Date()), 10);
+
+  // Date locale du jour (format YYYYMMDD)
+  const optionsFull = { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' };
+  const parts = new Intl.DateTimeFormat('fr-FR', optionsFull).formatToParts(new Date());
+  const year = parts.find(p => p.type === 'year').value;
+  const month = parts.find(p => p.type === 'month').value;
+  const day = parts.find(p => p.type === 'day').value;
+  const todayStr = `${year}${month}${day}`;
 
   let depart, arrivee, destinationLabel;
 
@@ -48,8 +56,7 @@ export default async function handler(req) {
 
   const authHeader = 'Basic ' + btoa(process.env.SNCF_API_KEY + ':');
   
-  // Itinéraires directs stricts avec données temps réel
-  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=25&max_nb_transfers=0&data_freshness=realtime&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
+  const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=30&max_nb_transfers=0&data_freshness=realtime&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
 
   try {
     const res = await fetch(sncfUrl, {
@@ -86,8 +93,20 @@ export default async function handler(req) {
       return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     };
 
-    // Filtrage strict : exclure les cars et les vrais Intercités
+    // Filtrage strict :
+    // 1. Uniquement la journée en cours (pas le lendemain)
+    // 2. Pas de cars
+    // 3. Pas d'Intercités nationaux (44xx, 45xx)
+    // 4. Maintien des Rémi Express (39xx)
     const validJourneys = journeys.filter((journey) => {
+      const depDateRaw = journey.departure_date_time || '';
+      const cleanDep = depDateRaw.replace(/[-:]/g, '');
+      
+      // Bloquer le lendemain : le train doit partir aujourd'hui
+      if (!cleanDep.startsWith(todayStr)) {
+        return false;
+      }
+
       const s = journey.sections?.find((sec) => sec.type === 'public_transport') || journey.sections?.[0];
       if (!s) return false;
       const info = s.display_informations;
@@ -127,7 +146,6 @@ export default async function handler(req) {
       const firstStop = stopTimes[0];
       const lastStop = stopTimes[stopTimes.length - 1];
 
-      // Extraction des dates de départ (théorique vs réel)
       const rawBaseDep =
         firstStop?.base_departure_date_time ||
         s?.base_departure_date_time ||
@@ -138,7 +156,6 @@ export default async function handler(req) {
         s?.departure_date_time ||
         journey.departure_date_time;
 
-      // Extraction des dates d'arrivée (théorique vs réel)
       const rawBaseArr =
         lastStop?.base_arrival_date_time ||
         s?.base_arrival_date_time ||
@@ -155,14 +172,13 @@ export default async function handler(req) {
       const dateBaseArr = parseSncfDate(rawBaseArr || rawRealArr);
       const dateRealArr = parseSncfDate(rawRealArr || rawBaseArr);
 
-      // Calcul du retard en minutes
       let retardMinutes = 0;
       if (dateBaseDep && dateRealDep) {
         const diff = Math.round((dateRealDep.getTime() - dateBaseDep.getTime()) / 60000);
         if (diff > 0) retardMinutes = diff;
       }
 
-      // Vérification des bulletins d'incidents / perturbations
+      // Disruptions
       const dIds = [
         ...(journey.disruption_ids || []),
         ...(s?.display_informations?.disruption_ids || [])
@@ -182,11 +198,9 @@ export default async function handler(req) {
         }
       }
 
-      // Recalcul des heures avec le retard si présent
       const finalDepReel = dateRealDep || new Date(dateBaseDep.getTime() + retardMinutes * 60000);
       const finalArrReel = dateRealArr || new Date((dateBaseArr || dateBaseDep).getTime() + retardMinutes * 60000);
 
-      // Durée exacte du trajet
       const dureeCalc = Math.round((dateBaseArr.getTime() - dateBaseDep.getTime()) / 60000);
       const dureeMinutes = dureeCalc > 0 ? dureeCalc : Math.round(journey.duration / 60);
 
