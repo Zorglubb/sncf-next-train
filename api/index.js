@@ -55,7 +55,7 @@ export default async function handler(req) {
   }
 
   const authHeader = 'Basic ' + btoa(process.env.SNCF_API_KEY + ':');
-  
+
   const sncfUrl = `https://api.sncf.com/v1/coverage/sncf/journeys?from=${depart}&to=${arrivee}&datetime=${dateSNCF}&count=30&max_nb_transfers=0&data_freshness=realtime&forbidden_uris[]=physical_mode:Coach&forbidden_uris[]=physical_mode:Bus`;
 
   try {
@@ -93,16 +93,30 @@ export default async function handler(req) {
       return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     };
 
-    // Filtrage strict :
-    // 1. Uniquement la journée en cours (pas le lendemain)
-    // 2. Pas de cars
-    // 3. Pas d'Intercités nationaux (44xx, 45xx)
-    // 4. Maintien des Rémi Express (39xx)
+    // Fonction dédiée pour extraire uniquement un vrai numéro de train (4 à 6 chiffres)
+    const extractTrainNumber = (section) => {
+      const info = section?.display_informations || {};
+      const candidates = [
+        info.trip_short_name,
+        info.headsign,
+        info.name,
+        ...(section?.links || []).map((l) => l.id),
+        section?.id
+      ];
+
+      for (const cand of candidates) {
+        if (!cand) continue;
+        const match = String(cand).match(/\b(\d{4,6})\b/);
+        if (match) return match[1];
+      }
+      return '';
+    };
+
+    // Filtrage strict
     const validJourneys = journeys.filter((journey) => {
       const depDateRaw = journey.departure_date_time || '';
       const cleanDep = depDateRaw.replace(/[-:]/g, '');
-      
-      // Bloquer le lendemain : le train doit partir aujourd'hui
+
       if (!cleanDep.startsWith(todayStr)) {
         return false;
       }
@@ -115,17 +129,10 @@ export default async function handler(req) {
       const physical = (info.physical_mode || '').toLowerCase();
       const commercial = (info.commercial_mode || '').toLowerCase();
       const network = (info.network || '').toLowerCase();
-      const headsign = (info.headsign || '').trim();
-      const tripShort = (info.trip_short_name || '').trim();
 
       if (physical.includes('coach') || physical.includes('bus') || commercial.includes('car')) return false;
 
-      let num = headsign;
-      if (!/^\d+$/.test(num)) num = tripShort;
-      if (!/^\d+$/.test(num)) {
-        const m = (s.id || '').match(/(\d{4,6})/);
-        num = m ? m[1] : '';
-      }
+      const num = extractTrainNumber(s);
 
       // Conserver les Rémi Express (39xx)
       if (num.startsWith('39')) return true;
@@ -208,10 +215,7 @@ export default async function handler(req) {
         journey.status === 'NO_SERVICE' ||
         s?.display_informations?.status === 'DELETED';
 
-      let numTrain = s?.display_informations?.headsign || 
-                     s?.display_informations?.trip_short_name || '';
-      const numMatch = numTrain.match(/\d{4,6}/);
-      const numTrainPure = numMatch ? numMatch[0] : numTrain;
+      const numTrainPure = extractTrainNumber(s);
 
       let retardLabel = "À l'heure";
       if (isCancelled) {
@@ -229,7 +233,7 @@ export default async function handler(req) {
         arriveeReelle: formatHHMM(finalArrReel),
         duree: `${dureeMinutes} min`,
         retardMinutes: retardMinutes,
-        numero: numTrainPure || numTrain,
+        numero: numTrainPure || 'TER',
         retard: retardLabel,
         estEnRetard: retardMinutes > 0 || isCancelled || isPerturbed,
         estSupprime: isCancelled,
