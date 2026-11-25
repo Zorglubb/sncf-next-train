@@ -11,8 +11,8 @@ export default async function handler(req) {
   const fromDatetime = searchParams.get('from_datetime');
   const offset = parseInt(searchParams.get('offset') || '0', 10);
 
-  const GARE_VIERZON = 'stop_area:SNCF:87576009';
-  const GARE_BOURGES = 'stop_area:SNCF:87576207';
+  const GARE_VIERZON = 'stop_area:SNC:FR::LMU:74db7110-cb0a-11e8-8bfa-f784c1c7c611:';
+  const GARE_BOURGES = 'stop_area:SNC:FR::LMU:88b33ec0-cb0a-11e8-8bfa-f784c1c7c611:';
 
   // Heure locale France
   const optionsDate = { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false };
