@@ -19,7 +19,7 @@
       color: #ffffff;
       display: flex;
       justify-content: center;
-      align-items: center; /* Centré au milieu de l'écran */
+      align-items: center;
       padding: 16px;
     }
     .widget {
@@ -122,6 +122,19 @@
       background: rgba(239, 68, 68, 0.15);
       color: #f87171;
     }
+    .meta-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge-voie {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+    }
     .train-num {
       font-size: 11px;
       color: #64748b;
@@ -200,6 +213,8 @@
         const card = document.createElement('div');
         card.className = `train-card ${isLate ? 'delayed' : ''} ${isCanc ? 'cancelled' : ''}`;
 
+        const voieBadge = t.voie ? `<span class="badge-voie">Voie ${t.voie}</span>` : '';
+
         card.innerHTML = `
           <div class="times-col">
             <div class="dep-row">
@@ -220,7 +235,10 @@
             <span class="badge ${isCanc ? 'cancelled' : isLate ? 'delayed' : 'ontime'}">
               ${t.retard}
             </span>
-            <span class="train-num">N° ${t.numero}</span>
+            <div class="meta-row">
+              ${voieBadge}
+              <span class="train-num">N° ${t.numero}</span>
+            </div>
           </div>
         `;
         container.appendChild(card);
