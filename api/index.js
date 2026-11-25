@@ -93,7 +93,7 @@ export default async function handler(req) {
       return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     };
 
-    // Fonction dédiée pour extraire uniquement un vrai numéro de train (4 à 6 chiffres)
+    // Extraction fiable du numéro de train (4 à 6 chiffres) compatible NeTEx/SIRI
     const extractTrainNumber = (section) => {
       const info = section?.display_informations || {};
       const candidates = [
@@ -112,7 +112,7 @@ export default async function handler(req) {
       return '';
     };
 
-    // Filtrage strict
+    // Filtrage strict : journée en cours, pas de cars, pas d'Intercités nationaux (44xx, 45xx)
     const validJourneys = journeys.filter((journey) => {
       const depDateRaw = journey.departure_date_time || '';
       const cleanDep = depDateRaw.replace(/[-:]/g, '');
@@ -217,6 +217,14 @@ export default async function handler(req) {
 
       const numTrainPure = extractTrainNumber(s);
 
+      // Numéro de voie / quai (flux SIRI)
+      const rawVoie =
+        firstStop?.platform ||
+        firstStop?.stop_point?.platform_code ||
+        s?.from?.stop_point?.platform_code ||
+        '';
+      const voieClean = String(rawVoie).trim();
+
       let retardLabel = "À l'heure";
       if (isCancelled) {
         retardLabel = 'Supprimé';
@@ -234,6 +242,7 @@ export default async function handler(req) {
         duree: `${dureeMinutes} min`,
         retardMinutes: retardMinutes,
         numero: numTrainPure || 'TER',
+        voie: voieClean,
         retard: retardLabel,
         estEnRetard: retardMinutes > 0 || isCancelled || isPerturbed,
         estSupprime: isCancelled,
